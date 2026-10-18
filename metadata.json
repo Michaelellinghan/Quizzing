@@ -1,0 +1,6 @@
+{
+  "name": "QuizCast Live - TV Spectator, Mobile Host & Player Handset",
+  "description": "Real-time synchronized quiz game system with TV spectator display, mobile host controller, instant player buzzers, rich media questions, round analytics, and Gemini AI assistant.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
