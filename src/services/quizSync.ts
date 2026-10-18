@@ -15,11 +15,17 @@ export const CLOUD_RUN_HOST = 'ais-pre-gn2ihvmb443kj3zt3zzttc-148054449091.europ
 
 function getBackendHttpUrl(): string {
   if (typeof window === 'undefined') return '';
+  const envUrl = (import.meta as any).env?.VITE_BACKEND_URL;
+  if (envUrl) return envUrl.replace(/\/$/, '');
   const currentHost = window.location.hostname;
-  if (currentHost.includes('netlify.app') || currentHost.includes('github.io') || currentHost.includes('vercel.app')) {
-    return (import.meta as any).env?.VITE_BACKEND_URL || '';
+  if (currentHost.includes('netlify.app') || currentHost.includes('vercel.app')) {
+    // Proxied by netlify.toml or fallback to Cloud Run over standard Port 443 HTTPS
+    return window.location.origin;
   }
-  return (import.meta as any).env?.VITE_BACKEND_URL || '';
+  if (currentHost === 'localhost' || currentHost === '127.0.0.1') {
+    return '';
+  }
+  return `https://${CLOUD_RUN_HOST}`;
 }
 
 function createDefaultRoom(code: string): GameRoom {
@@ -764,6 +770,30 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
       }
     }, 2000);
 
+    // 5. Tier 4: Background HTTPS Port 443 Polling (Guaranteed failover over Port 443)
+    const apiBase = getBackendHttpUrl();
+    let pollInterval: any = null;
+    if (apiBase) {
+      pollInterval = setInterval(async () => {
+        if (isCleanedUp) return;
+        try {
+          const res = await fetch(`${apiBase}/api/room/${normalizedCode}`, { cache: 'no-store' });
+          if (res.ok) {
+            const data = await res.json();
+            if (data?.room) {
+              handleNetworkMessage({
+                type: 'SYNC_ROOM',
+                roomCode: normalizedCode,
+                room: data.room,
+                revision: data.room.revision || 1,
+                nonce: `poll_${Date.now()}`
+              });
+            }
+          }
+        } catch (e) {}
+      }, 1500);
+    }
+
     // Initial player sync request immediately on component mount
     if (role === 'player' && playerId) {
       setTimeout(() => {
@@ -780,6 +810,7 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
     return () => {
       isCleanedUp = true;
       clearInterval(heartbeatTimer);
+      if (pollInterval) clearInterval(pollInterval);
       if (mqttClientRef.current) {
         try {
           mqttClientRef.current.end(true);
