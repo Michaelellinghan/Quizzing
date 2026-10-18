@@ -109,7 +109,7 @@ export default function App() {
   const activeQ = room?.questions[room.currentQIndex];
 
   // Dedicated TV Spectator 16:9 Viewport (Strictly zero-scroll and full 16:9 frame)
-  if (role === 'tv' && room) {
+  if (role === 'tv') {
     return (
       <div id="tv-viewport-container" className="h-screen w-screen max-h-screen max-w-screen overflow-hidden bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
         <TVView
@@ -150,13 +150,6 @@ export default function App() {
             onLaunchRole={handleLaunchRole}
             onOpenQuizStudio={() => setIsQuizStudioOpen(true)}
           />
-        ) : !room ? (
-          <div className="flex flex-col items-center justify-center p-12 text-center gap-3">
-            <Loader2 className="w-8 h-8 text-amber-400 animate-spin" />
-            <p className="text-slate-400 font-medium text-sm">
-              Connecting to room <span className="font-mono text-white font-bold">{roomCode}</span>...
-            </p>
-          </div>
         ) : role === 'host' ? (
           <HostView
             room={room}

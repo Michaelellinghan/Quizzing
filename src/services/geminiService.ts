@@ -7,11 +7,24 @@ export interface ChatRequestOptions {
   model?: 'gemini-3.8-flash' | 'gemini-4-argon' | 'gemini-3.1-flash-lite';
 }
 
+export const CLOUD_RUN_BACKEND = 'https://ais-pre-gn2ihvmb443kj3zt3zzttc-148054449091.europe-west2.run.app';
+
+export function getApiBaseUrl(): string {
+  if (typeof window !== 'undefined') {
+    const host = window.location.hostname;
+    if (host.includes('netlify.app') || host.includes('github.io') || host.includes('vercel.app')) {
+      return (import.meta as any).env?.VITE_BACKEND_URL || CLOUD_RUN_BACKEND;
+    }
+  }
+  return (import.meta as any).env?.VITE_BACKEND_URL || '';
+}
+
 async function fetchWithTimeout(url: string, options: RequestInit, timeoutMs = 9000): Promise<Response> {
   const controller = new AbortController();
   const id = setTimeout(() => controller.abort(), timeoutMs);
+  const fullUrl = url.startsWith('http') ? url : `${getApiBaseUrl()}${url}`;
   try {
-    const res = await fetch(url, { ...options, signal: controller.signal });
+    const res = await fetch(fullUrl, { ...options, signal: controller.signal });
     return res;
   } finally {
     clearTimeout(id);
