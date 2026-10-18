@@ -69,9 +69,10 @@ export const Header: React.FC<HeaderProps> = ({
         </div>
 
         {/* Live sync badge */}
-        <div className="hidden sm:flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-semibold bg-slate-800/80 border border-slate-700 text-slate-300">
+        <div className="flex items-center gap-1.5 px-2 py-1 rounded-full text-xs font-semibold bg-slate-800/80 border border-slate-700 text-slate-300">
           <span className={`w-2 h-2 rounded-full ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-rose-500'}`} />
-          <span>{connected ? `Real-Time (${latencyMs > 0 ? `${latencyMs}ms` : 'Sub-ms'})` : 'Connecting...'}</span>
+          <span className="hidden sm:inline">{connected ? `Real-Time (${latencyMs > 0 ? `${latencyMs}ms` : 'Sub-ms'})` : 'Connecting...'}</span>
+          <span className="sm:hidden text-[11px] font-bold">{connected ? 'Live' : 'Connecting'}</span>
         </div>
 
         {/* Room Code Badge */}

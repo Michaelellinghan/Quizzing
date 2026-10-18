@@ -66,6 +66,7 @@ export interface Player {
   connected: boolean;
   avatar?: string;
   lastBuzzTime?: number;
+  lastSeen?: number;
 }
 
 export interface Buzz {
@@ -100,6 +101,8 @@ export interface GameRoom {
   questionHistory: Record<string, { correctCount: number; totalAttempts: number; buzzTimes: number[] }>;
   soundTrigger?: { sound: string; nonce: number };
   lastUpdated: number;
+  hostLastSeen?: number;
+  hostConnected?: boolean;
 }
 
 const rooms: Record<string, GameRoom> = {};
@@ -504,6 +507,18 @@ export function processRoomAction(action: {
           break;
         }
 
+        case 'HEARTBEAT': {
+          if (playerId && room.players[playerId]) {
+            room.players[playerId].connected = true;
+            room.players[playerId].lastSeen = now;
+          }
+          if (role === 'host') {
+            room.hostLastSeen = now;
+            room.hostConnected = true;
+          }
+          break;
+        }
+
         default:
           break;
       }
@@ -514,10 +529,24 @@ export function processRoomAction(action: {
     return room;
   }
 
-// ---------------- WEBSOCKET HANDLING ----------------
-wss.on('connection', (ws: WebSocket & { roomCode?: string; clientId?: string; role?: string }) => {
+// ---------------- WEBSOCKET HANDLING WITH HEARTBEAT ----------------
+interface HeartbeatWebSocket extends WebSocket {
+  roomCode?: string;
+  clientId?: string;
+  role?: string;
+  isAlive?: boolean;
+}
+
+wss.on('connection', (ws: HeartbeatWebSocket) => {
+  ws.isAlive = true;
+
+  ws.on('pong', () => {
+    ws.isAlive = true;
+  });
+
   ws.on('message', (data: string) => {
     try {
+      ws.isAlive = true;
       const msg = JSON.parse(data.toString());
       const normalizedCode = (msg.roomCode || 'QUIZ').trim().toUpperCase();
 
@@ -530,6 +559,17 @@ wss.on('connection', (ws: WebSocket & { roomCode?: string; clientId?: string; ro
       ws.role = msg.role;
 
       processRoomAction(msg);
+
+      // Echo back heartbeat confirmation if heartbeat message
+      if (msg.type === 'HEARTBEAT' || msg.type === 'PING') {
+        try {
+          ws.send(JSON.stringify({
+            type: 'SERVER_HEARTBEAT_ACK',
+            timestamp: Date.now(),
+            role: msg.role
+          }));
+        } catch (e) {}
+      }
     } catch (e) {
       console.error('WS parsing error:', e);
     }
@@ -549,7 +589,60 @@ wss.on('connection', (ws: WebSocket & { roomCode?: string; clientId?: string; ro
   });
 });
 
+// Periodic Server-Side WebSocket Ping/Pong & Stream Keep-Alive Sweep (Every 15s)
+// Prevents cloud proxies (Cloud Run, reverse proxies) and cellular carriers from dropping idle connections
+const wsServerHeartbeat = setInterval(() => {
+  wss.clients.forEach((client: any) => {
+    if (client.isAlive === false) {
+      return client.terminate();
+    }
+    client.isAlive = false;
+    try {
+      client.ping();
+      client.send(JSON.stringify({
+        type: 'SERVER_HEARTBEAT',
+        timestamp: Date.now()
+      }));
+    } catch (e) {}
+  });
+}, 15000);
+
+// Clean up heartbeat timer if server stops
+server.on('close', () => {
+  clearInterval(wsServerHeartbeat);
+});
+
 // ---------------- REST API ROUTES ----------------
+
+// Dedicated Heartbeat Route: Unthrottled check-in for mobile host and TV clients
+app.all('/api/room/:code/heartbeat', (req, res) => {
+  const code = (req.params.code || 'QUIZ').trim().toUpperCase();
+  const room = getOrCreateRoom(code);
+  const now = Date.now();
+  const data = req.method === 'POST' ? req.body : req.query;
+  const { playerId, role } = data || {};
+
+  if (playerId && room.players[playerId]) {
+    room.players[playerId].connected = true;
+    room.players[playerId].lastSeen = now;
+  }
+  if (role === 'host') {
+    room.hostLastSeen = now;
+    room.hostConnected = true;
+  }
+
+  const isHostAlive = !!(room.hostLastSeen && (now - room.hostLastSeen < 30000));
+  room.hostConnected = isHostAlive;
+
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+  res.json({
+    success: true,
+    timestamp: now,
+    lastUpdated: room.lastUpdated,
+    hostConnected: isHostAlive,
+    playersCount: Object.keys(room.players).length
+  });
+});
 
 // Get room state (polled by TV and mobile clients)
 app.get('/api/room/:code', (req, res) => {

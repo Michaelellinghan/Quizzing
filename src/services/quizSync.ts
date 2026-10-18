@@ -37,7 +37,8 @@ function createDefaultRoom(code: string): GameRoom {
     buzzes: [],
     submissions: {},
     questionHistory: {},
-    lastUpdated: Date.now()
+    lastUpdated: Date.now(),
+    revision: 1
   };
 }
 
@@ -60,13 +61,14 @@ export function reduceGameAction(
     buzzes: [...prevRoom.buzzes],
     submissions: { ...prevRoom.submissions },
     questions: [...prevRoom.questions],
-    questionHistory: { ...prevRoom.questionHistory }
+    questionHistory: { ...prevRoom.questionHistory },
+    revision: (prevRoom.revision || 1) + 1
   };
 
   switch (type) {
     case 'JOIN_ROOM': {
       if (role === 'player' && playerId) {
-        const cleanName = (playerName || 'Player').trim();
+        const cleanName = (payload?.name || playerName || 'Player').trim();
         if (!updated.players[playerId]) {
           updated.players[playerId] = {
             id: playerId,
@@ -74,12 +76,14 @@ export function reduceGameAction(
             score: 0,
             streak: 0,
             connected: true,
-            avatar: `avatar-${(Object.keys(updated.players).length % 8) + 1}`
+            avatar: `avatar-${(Object.keys(updated.players).length % 8) + 1}`,
+            lastSeen: now
           };
         } else {
           updated.players[playerId] = {
             ...updated.players[playerId],
             connected: true,
+            lastSeen: now,
             name: cleanName && cleanName !== 'Player' ? cleanName : updated.players[playerId].name
           };
         }
@@ -380,20 +384,24 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
       if (saved) {
         const parsed = JSON.parse(saved);
         if (parsed && Array.isArray(parsed.questions) && parsed.questions.length > 0) {
-          return parsed;
+          return {
+            ...parsed,
+            revision: parsed.revision || 1
+          };
         }
       }
     } catch (e) {}
     return createDefaultRoom(normalizedCode);
   });
 
-  const [connected, setConnected] = useState<boolean>(true);
+  const [connected, setConnected] = useState<boolean>(false);
   const [latencyMs, setLatencyMs] = useState<number>(0);
 
   const mqttClientRef = useRef<MqttClient | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
   const lastSoundNonceRef = useRef<number>(0);
-  const lastKnownUpdatedRef = useRef<number>(room?.lastUpdated || 0);
+  const processedNoncesRef = useRef<Set<string>>(new Set());
   const roomRef = useRef<GameRoom>(room);
   roomRef.current = room;
 
@@ -406,11 +414,14 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
     }
   }, [room, normalizedCode]);
 
-  // Handle incoming room state update safely
-  const applyIncomingRoom = useCallback((incoming: GameRoom) => {
-    if (!incoming || typeof incoming.lastUpdated !== 'number') return;
-    if (incoming.lastUpdated >= lastKnownUpdatedRef.current) {
-      lastKnownUpdatedRef.current = incoming.lastUpdated;
+  // Master Room State Update (handles sound triggers, revision increments, and broadcast)
+  const applyRoomState = useCallback((incoming: GameRoom, force = false) => {
+    if (!incoming) return;
+    const currentRev = roomRef.current.revision || 1;
+    const incomingRev = incoming.revision || 1;
+
+    // Apply if incoming has equal/higher revision, or forced (e.g. initial sync from host/TV)
+    if (force || incomingRev >= currentRev || role === 'player') {
       setRoom(incoming);
 
       // Sound trigger
@@ -424,35 +435,227 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
         try {
           broadcastChannelRef.current.postMessage({
             type: 'ROOM_SYNC',
-            room: incoming
+            room: incoming,
+            force
           });
         } catch (e) {}
       }
     }
-  }, []);
+  }, [role]);
 
-  // Connect to Universal Real-Time Mesh: MQTT Cloud + BroadcastChannel + Local API fallback
+  // Unified multi-transport message publisher:
+  // Sends message across: 1) MQTT Cloud, 2) HTTPS / SSE Relay (ntfy.sh), 3) BroadcastChannel, 4) Local REST API
+  const publishToNetwork = useCallback((msg: any) => {
+    const rawJson = JSON.stringify(msg);
+    const mqttTopic = `quizcast_mesh_v5_${normalizedCode}`;
+    const httpTopic = `quizcast_ntfy_v5_${normalizedCode.toLowerCase()}`;
+
+    // 1. MQTT Cloud Publish
+    if (mqttClientRef.current && mqttClientRef.current.connected) {
+      try {
+        mqttClientRef.current.publish(mqttTopic, rawJson, { qos: 0 });
+      } catch (e) {}
+    }
+
+    // 2. HTTPS / SSE Relay Publish (over standard port 443, immune to cellular port blocking)
+    try {
+      fetch(`https://ntfy.sh/${httpTopic}`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: rawJson,
+        mode: 'cors'
+      }).catch(() => {});
+    } catch (e) {}
+
+    // 3. BroadcastChannel (Same-device instant 0ms sync)
+    if (broadcastChannelRef.current) {
+      try {
+        broadcastChannelRef.current.postMessage(msg);
+      } catch (e) {}
+    }
+
+    // 4. Express REST API (if available)
+    const apiBase = getBackendHttpUrl();
+    if (apiBase && (msg.type === 'PLAYER_ACTION' || msg.type === 'HOST_ACTION')) {
+      try {
+        fetch(`${apiBase}/api/room/${normalizedCode}/action`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            ...msg.action,
+            roomCode: normalizedCode
+          })
+        }).catch(() => {});
+      } catch (e) {}
+    }
+  }, [normalizedCode]);
+
+  // Main Real-Time Network Engine (Dual-Mesh: MQTT + HTTPS SSE + BroadcastChannel)
   useEffect(() => {
     if (!role) return;
 
     let isCleanedUp = false;
-    const mqttTopic = `quizcast_v4_room_${normalizedCode}`;
+    const mqttTopic = `quizcast_mesh_v5_${normalizedCode}`;
+    const httpTopic = `quizcast_ntfy_v5_${normalizedCode.toLowerCase()}`;
+    const pingStart = Date.now();
 
-    // 1. Tier 1: Local cross-tab BroadcastChannel for zero-latency same-computer sync
+    // Deduplication helper to prevent feedback loops across multi-transport
+    const isDuplicate = (nonce?: string) => {
+      if (!nonce) return false;
+      if (processedNoncesRef.current.has(nonce)) return true;
+      processedNoncesRef.current.add(nonce);
+      if (processedNoncesRef.current.size > 200) {
+        const arr = Array.from(processedNoncesRef.current);
+        processedNoncesRef.current = new Set(arr.slice(50));
+      }
+      return false;
+    };
+
+    // Central Incoming Message Dispatcher
+    const handleNetworkMessage = (data: any) => {
+      if (isCleanedUp || !data || !data.type) return;
+      if (data.roomCode && data.roomCode !== normalizedCode) return;
+      if (data.nonce && isDuplicate(data.nonce)) return;
+
+      const isAuthority = role === 'tv' || role === 'host';
+
+      switch (data.type) {
+        // A. A player joined or asked for full room state
+        case 'PLAYER_JOIN':
+        case 'REQUEST_ROOM_SYNC': {
+          if (isAuthority) {
+            // Register player in authority room
+            let current = roomRef.current;
+            if (data.playerId) {
+              current = reduceGameAction(current, {
+                type: 'JOIN_ROOM',
+                playerId: data.playerId,
+                playerName: data.playerName || 'Player',
+                role: 'player'
+              });
+              applyRoomState(current);
+            }
+
+            // Immediately reply with authoritative full room state
+            publishToNetwork({
+              type: 'SYNC_ROOM',
+              roomCode: normalizedCode,
+              room: current,
+              revision: current.revision || 1,
+              isFullSync: true,
+              targetPlayerId: data.playerId,
+              nonce: `sync_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+            });
+          }
+          break;
+        }
+
+        // B. Player performed an action (buzzed in, submitted answer, etc.)
+        case 'PLAYER_ACTION': {
+          if (data.action) {
+            // Both Authority and handsets can process the action deterministically
+            const updated = reduceGameAction(roomRef.current, data.action);
+            applyRoomState(updated);
+
+            // If we are the Authority (TV or Host), broadcast the confirmed room state
+            if (isAuthority) {
+              publishToNetwork({
+                type: 'SYNC_ROOM',
+                roomCode: normalizedCode,
+                room: updated,
+                revision: updated.revision,
+                actionOriginId: data.actionId,
+                nonce: `conf_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+              });
+            }
+          }
+          break;
+        }
+
+        // C. Host performed a host action (changed question, started round, revealed answer)
+        case 'HOST_ACTION': {
+          if (data.action) {
+            const updated = reduceGameAction(roomRef.current, data.action);
+            applyRoomState(updated);
+          }
+          break;
+        }
+
+        // D. Authoritative room state broadcast
+        case 'SYNC_ROOM': {
+          if (data.room) {
+            // If targetPlayerId is specified and not us, ignore
+            if (data.targetPlayerId && role === 'player' && data.targetPlayerId !== playerId) {
+              return;
+            }
+            applyRoomState(data.room, data.isFullSync || false);
+          }
+          break;
+        }
+
+        // E. Heartbeat from TV / Host
+        case 'HEARTBEAT': {
+          if (role === 'player') {
+            const localRev = roomRef.current.revision || 1;
+            // If host has advanced questions or revision is ahead, request sync
+            if ((data.revision && data.revision > localRev) || roomRef.current.phase !== data.phase) {
+              publishToNetwork({
+                type: 'REQUEST_ROOM_SYNC',
+                roomCode: normalizedCode,
+                playerId,
+                playerName,
+                nonce: `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+              });
+            }
+          }
+          break;
+        }
+
+        default:
+          break;
+      }
+    };
+
+    // 1. Setup Local BroadcastChannel (Same-Device Instant Sync)
     try {
-      const bc = new BroadcastChannel(`quizcast_bc_${normalizedCode}`);
+      const bc = new BroadcastChannel(`quizcast_bc_v5_${normalizedCode}`);
       broadcastChannelRef.current = bc;
       bc.onmessage = (event) => {
-        if (event.data?.type === 'ROOM_SYNC' && event.data.room) {
-          applyIncomingRoom(event.data.room);
+        if (event.data) {
+          handleNetworkMessage(event.data);
         }
       };
-    } catch (e) {
-      console.warn('BroadcastChannel not supported', e);
-    }
+    } catch (e) {}
 
-    // 2. Tier 2: MQTT Cloud Real-Time Mesh (Instant sync across phones, TVs, laptops, Netlify)
-    const clientUuid = `qc_${role}_${Math.random().toString(36).substring(2, 9)}`;
+    // 2. Setup HTTPS / SSE Stream (Over standard port 443 via ntfy.sh)
+    try {
+      const es = new EventSource(`https://ntfy.sh/${httpTopic}/sse`);
+      eventSourceRef.current = es;
+
+      es.onopen = () => {
+        if (!isCleanedUp) {
+          setConnected(true);
+          setLatencyMs(Math.max(1, Date.now() - pingStart));
+        }
+      };
+
+      es.onmessage = (event) => {
+        if (isCleanedUp || !event.data) return;
+        try {
+          const raw = JSON.parse(event.data);
+          if (raw.event === 'message' && raw.message) {
+            const parsed = typeof raw.message === 'string' ? JSON.parse(raw.message) : raw.message;
+            handleNetworkMessage(parsed);
+          }
+        } catch (e) {}
+      };
+
+      es.onerror = () => {
+        // Fallback / reconnect handled by EventSource automatically
+      };
+    } catch (e) {}
+
+    // 3. Setup MQTT Cloud Mesh (High-Speed Low-Latency WebSocket transport)
     const mqttBrokers = [
       'wss://broker.emqx.io:8084/mqtt',
       'wss://broker.hivemq.com:8884/mqtt'
@@ -462,13 +665,13 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
     function connectMqtt() {
       if (isCleanedUp) return;
       const brokerUrl = mqttBrokers[brokerIndex % mqttBrokers.length];
-      const pingStart = Date.now();
+      const clientUuid = `qc_${role}_${Math.random().toString(36).substring(2, 9)}`;
 
       try {
         const client = mqtt.connect(brokerUrl, {
           clientId: clientUuid,
           clean: true,
-          connectTimeout: 5000,
+          connectTimeout: 4000,
           reconnectPeriod: 3000,
           keepalive: 30
         });
@@ -481,70 +684,36 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
 
           client.subscribe(mqttTopic, { qos: 0 }, (err) => {
             if (!err && !isCleanedUp) {
-              // If we are a player joining, request latest room state from TV / Host
+              // Immediately announce join or broadcast state
               if (role === 'player') {
-                client.publish(
-                  mqttTopic,
-                  JSON.stringify({
-                    type: 'REQUEST_ROOM_SYNC',
-                    requesterId: playerId,
-                    requesterName: playerName,
-                    timestamp: Date.now()
-                  })
-                );
+                const joinMsg = {
+                  type: 'PLAYER_JOIN',
+                  roomCode: normalizedCode,
+                  playerId,
+                  playerName: playerName || 'Player',
+                  nonce: `join_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+                };
+                publishToNetwork(joinMsg);
               } else if (role === 'tv' || role === 'host') {
-                // TV / Host announces current room state to any waiting phones
-                client.publish(
-                  mqttTopic,
-                  JSON.stringify({
-                    type: 'ROOM_ANNOUNCE',
-                    room: roomRef.current,
-                    senderRole: role
-                  })
-                );
+                publishToNetwork({
+                  type: 'SYNC_ROOM',
+                  roomCode: normalizedCode,
+                  room: roomRef.current,
+                  revision: roomRef.current.revision || 1,
+                  isFullSync: true,
+                  nonce: `init_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+                });
               }
             }
           });
         });
 
-        client.on('message', (_t, msgBuffer) => {
+        client.on('message', (_topic, msgBuffer) => {
           if (isCleanedUp) return;
           try {
             const data = JSON.parse(msgBuffer.toString());
-
-            // A. Someone requested room sync (e.g. phone just scanned QR code)
-            if (data.type === 'REQUEST_ROOM_SYNC') {
-              if (role === 'tv' || role === 'host') {
-                client.publish(
-                  mqttTopic,
-                  JSON.stringify({
-                    type: 'ROOM_ANNOUNCE',
-                    room: roomRef.current,
-                    senderRole: role
-                  })
-                );
-              }
-              // Also auto-add player to room if not present
-              if (data.requesterId) {
-                const updated = reduceGameAction(roomRef.current, {
-                  type: 'JOIN_ROOM',
-                  playerId: data.requesterId,
-                  playerName: data.requesterName,
-                  role: 'player'
-                });
-                applyIncomingRoom(updated);
-              }
-            }
-
-            // B. Room state announce or action broadcast
-            else if (data.type === 'ROOM_ANNOUNCE' || data.type === 'GAME_ACTION_BROADCAST') {
-              if (data.room) {
-                applyIncomingRoom(data.room);
-              }
-            }
-          } catch (err) {
-            console.warn('MQTT message parse error:', err);
-          }
+            handleNetworkMessage(data);
+          } catch (e) {}
         });
 
         client.on('error', () => {
@@ -554,7 +723,7 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
             setTimeout(connectMqtt, 3000);
           }
         });
-      } catch (err) {
+      } catch (e) {
         brokerIndex++;
         if (!isCleanedUp) {
           setTimeout(connectMqtt, 3000);
@@ -564,41 +733,61 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
 
     connectMqtt();
 
-    // 3. Tier 3: Local backend polling (runs if app is hosted with local Express backend)
-    const apiBase = getBackendHttpUrl();
-    let pollTimer: any = null;
-    if (apiBase) {
-      pollTimer = setInterval(async () => {
-        if (isCleanedUp) return;
-        try {
-          const res = await fetch(`${apiBase}/api/room/${normalizedCode}`, { cache: 'no-store' });
-          if (res.ok) {
-            const data = await res.json();
-            if (data?.room) {
-              applyIncomingRoom(data.room);
-            }
-          }
-        } catch (e) {}
-      }, 900);
-    }
+    // 4. Heartbeat timer:
+    // TV and Host broadcast authoritative heartbeat every 2000ms.
+    // Player requests room sync if not yet in sync.
+    const heartbeatTimer = setInterval(() => {
+      if (isCleanedUp) return;
 
-    // Auto-register player on join
+      if (role === 'tv' || role === 'host') {
+        publishToNetwork({
+          type: 'HEARTBEAT',
+          roomCode: normalizedCode,
+          revision: roomRef.current.revision || 1,
+          phase: roomRef.current.phase,
+          currentQIndex: roomRef.current.currentQIndex,
+          inputOpen: roomRef.current.inputOpen,
+          playerCount: Object.keys(roomRef.current.players).length,
+          timestamp: Date.now()
+        });
+      } else if (role === 'player') {
+        // If player has not received any questions or is in empty room, request sync
+        if (!roomRef.current.questions || roomRef.current.questions.length === 0 || roomRef.current.phase === 'LOBBY') {
+          publishToNetwork({
+            type: 'REQUEST_ROOM_SYNC',
+            roomCode: normalizedCode,
+            playerId,
+            playerName: playerName || 'Player',
+            nonce: `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+          });
+        }
+      }
+    }, 2000);
+
+    // Initial player sync request immediately on component mount
     if (role === 'player' && playerId) {
-      const updated = reduceGameAction(roomRef.current, {
-        type: 'JOIN_ROOM',
-        playerId,
-        playerName: playerName || 'Player',
-        role: 'player'
-      });
-      applyIncomingRoom(updated);
+      setTimeout(() => {
+        publishToNetwork({
+          type: 'PLAYER_JOIN',
+          roomCode: normalizedCode,
+          playerId,
+          playerName: playerName || 'Player',
+          nonce: `init_join_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+        });
+      }, 300);
     }
 
     return () => {
       isCleanedUp = true;
-      if (pollTimer) clearInterval(pollTimer);
+      clearInterval(heartbeatTimer);
       if (mqttClientRef.current) {
         try {
           mqttClientRef.current.end(true);
+        } catch (e) {}
+      }
+      if (eventSourceRef.current) {
+        try {
+          eventSourceRef.current.close();
         } catch (e) {}
       }
       if (broadcastChannelRef.current) {
@@ -607,13 +796,12 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
         } catch (e) {}
       }
     };
-  }, [normalizedCode, role, playerId, playerName, applyIncomingRoom]);
+  }, [normalizedCode, role, playerId, playerName, applyRoomState, publishToNetwork]);
 
   // Universal Action Dispatcher:
-  // 1. Runs deterministic reducer locally for zero-latency response
-  // 2. Broadcasts instantly to MQTT mesh (phones + TV + host on Netlify / remote)
-  // 3. Broadcasts to same-device tabs via BroadcastChannel
-  // 4. Posts to Express backend if reachable
+  // Dispatches actions according to role:
+  // - Player: Sends PLAYER_ACTION across network + applies optimistically locally
+  // - Host / TV: Applies action to room state + broadcasts HOST_ACTION & SYNC_ROOM
   const sendAction = useCallback(
     (type: string, payload?: any) => {
       const actionObj = {
@@ -624,61 +812,40 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
         payload
       };
 
-      // 1. Immediately update local state
+      const actionId = `act_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+
+      // 1. Optimistically apply locally
       const updated = reduceGameAction(roomRef.current, actionObj);
-      lastKnownUpdatedRef.current = updated.lastUpdated;
-      setRoom(updated);
+      applyRoomState(updated);
 
-      // Play local sound if action triggered one
-      if (updated.soundTrigger && updated.soundTrigger.nonce !== lastSoundNonceRef.current) {
-        lastSoundNonceRef.current = updated.soundTrigger.nonce;
-        soundEffects.play(updated.soundTrigger.sound);
-      }
-
-      // 2. Broadcast across all tabs on this device
-      if (broadcastChannelRef.current) {
-        try {
-          broadcastChannelRef.current.postMessage({
-            type: 'ROOM_SYNC',
-            room: updated
-          });
-        } catch (e) {}
-      }
-
-      // 3. Publish to Global MQTT Cloud Mesh (connects phone to TV on Netlify in <50ms)
-      if (mqttClientRef.current && mqttClientRef.current.connected) {
-        try {
-          const mqttTopic = `quizcast_v4_room_${normalizedCode}`;
-          mqttClientRef.current.publish(
-            mqttTopic,
-            JSON.stringify({
-              type: 'GAME_ACTION_BROADCAST',
-              action: type,
-              senderRole: role,
-              senderId: playerId,
-              room: updated
-            }),
-            { qos: 0 }
-          );
-        } catch (e) {
-          console.warn('MQTT publish error:', e);
-        }
-      }
-
-      // 4. Also post to REST API if backend is running
-      const apiBase = getBackendHttpUrl();
-      if (apiBase) {
-        fetch(`${apiBase}/api/room/${normalizedCode}/action`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            ...actionObj,
-            roomCode: normalizedCode
-          })
-        }).catch(() => {});
+      // 2. Transmit action to all connected devices (phones, TVs, laptops on Netlify)
+      if (role === 'player') {
+        publishToNetwork({
+          type: 'PLAYER_ACTION',
+          roomCode: normalizedCode,
+          action: actionObj,
+          actionId,
+          nonce: actionId
+        });
+      } else {
+        // TV or Host Authority
+        publishToNetwork({
+          type: 'HOST_ACTION',
+          roomCode: normalizedCode,
+          action: actionObj,
+          actionId,
+          nonce: actionId
+        });
+        publishToNetwork({
+          type: 'SYNC_ROOM',
+          roomCode: normalizedCode,
+          room: updated,
+          revision: updated.revision,
+          nonce: `sync_${actionId}`
+        });
       }
     },
-    [normalizedCode, role, playerId, playerName]
+    [normalizedCode, role, playerId, playerName, applyRoomState, publishToNetwork]
   );
 
   const buzzIn = useCallback(() => {
@@ -773,6 +940,13 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
     [sendAction]
   );
 
+  const updatePlayerName = useCallback(
+    (newName: string) => {
+      sendAction('JOIN_ROOM', { name: newName });
+    },
+    [sendAction]
+  );
+
   return {
     room,
     connected,
@@ -790,6 +964,7 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
     editQuestion,
     deleteQuestion,
     triggerSound,
-    kickPlayer
+    kickPlayer,
+    updatePlayerName
   };
 }

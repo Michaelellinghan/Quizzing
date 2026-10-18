@@ -174,6 +174,11 @@ export const TVView: React.FC<TVViewProps> = ({
             <span>LIVE BROADCAST</span>
           </div>
 
+          <div className="hidden md:flex items-center gap-1.5 px-2 py-0.5 rounded-full text-[10px] font-semibold bg-slate-800/90 border border-slate-700 text-slate-300">
+            <span className={`w-1.5 h-1.5 rounded-full ${connected ? 'bg-emerald-400 animate-pulse' : 'bg-amber-400'}`} />
+            <span>{connected ? `Mesh Live (${latencyMs > 0 ? `${latencyMs}ms` : '<10ms'})` : 'Connecting...'}</span>
+          </div>
+
           <span className="text-xs text-slate-400 font-medium truncate max-w-[180px] hidden md:inline">
             {room.currentPackTitle}
           </span>

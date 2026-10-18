@@ -84,16 +84,60 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
       
       {/* 1. PLAYER STATUS HEADER */}
       <div className="bg-slate-900 border border-slate-800 rounded-2xl p-4 shadow-md flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-600 flex items-center justify-center font-black text-white text-lg shadow-sm">
-            {playerName.charAt(0).toUpperCase()}
+        <div className="flex items-center gap-3 min-w-0">
+          <div className="w-10 h-10 rounded-xl bg-gradient-to-tr from-emerald-500 to-teal-600 flex items-center justify-center font-black text-white text-lg shadow-sm shrink-0">
+            {playerName ? playerName.charAt(0).toUpperCase() : 'P'}
           </div>
-          <div>
-            <div className="text-xs text-slate-400 font-medium">Player / Team</div>
-            <div className="font-extrabold text-white text-base leading-tight truncate max-w-[150px]">
-              {playerName}
+          {isEditingName ? (
+            <form
+              onSubmit={(e) => {
+                e.preventDefault();
+                const trimmed = nameInput.trim();
+                if (trimmed) {
+                  onUpdatePlayerName?.(trimmed);
+                  setIsEditingName(false);
+                }
+              }}
+              className="flex items-center gap-1.5"
+            >
+              <input
+                type="text"
+                value={nameInput}
+                onChange={(e) => setNameInput(e.target.value)}
+                placeholder="Your Name"
+                autoFocus
+                maxLength={20}
+                className="bg-slate-950 border border-amber-500/80 rounded-lg px-2 py-1 text-xs text-white font-bold w-28 focus:outline-none focus:ring-1 focus:ring-amber-400"
+              />
+              <button
+                type="submit"
+                className="p-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 text-xs font-bold cursor-pointer transition"
+                title="Save Name"
+              >
+                <Check className="w-3.5 h-3.5" />
+              </button>
+            </form>
+          ) : (
+            <div className="flex flex-col min-w-0">
+              <div className="text-[10px] text-slate-400 font-medium uppercase tracking-wider flex items-center gap-1">
+                <span>Player</span>
+                <button
+                  type="button"
+                  onClick={() => {
+                    setNameInput(playerName === 'Player' ? '' : playerName);
+                    setIsEditingName(true);
+                  }}
+                  className="text-amber-400 hover:text-amber-300 transition cursor-pointer p-0.5"
+                  title="Edit Name"
+                >
+                  <Edit3 className="w-3 h-3" />
+                </button>
+              </div>
+              <div className="font-extrabold text-white text-base leading-tight truncate max-w-[140px]">
+                {playerName}
+              </div>
             </div>
-          </div>
+          )}
         </div>
 
         <div className="flex items-center gap-2">

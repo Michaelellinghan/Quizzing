@@ -66,7 +66,8 @@ export default function App() {
     editQuestion,
     deleteQuestion,
     triggerSound,
-    kickPlayer
+    kickPlayer,
+    updatePlayerName
   } = useQuizSync({
     roomCode,
     role,
@@ -179,6 +180,7 @@ export default function App() {
             onUpdatePlayerName={(newName: string) => {
               setPlayerName(newName);
               localStorage.setItem('quizcast_player_name', newName);
+              updatePlayerName(newName);
             }}
           />
         )}

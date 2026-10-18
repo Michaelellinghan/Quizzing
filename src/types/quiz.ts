@@ -22,6 +22,7 @@ export interface Player {
   connected: boolean;
   avatar?: string;
   lastBuzzTime?: number;
+  lastSeen?: number;
 }
 
 export interface Buzz {
@@ -64,6 +65,9 @@ export interface GameRoom {
   questionHistory: Record<string, QuestionStat>;
   soundTrigger?: { sound: string; nonce: number };
   lastUpdated: number;
+  revision?: number;
+  hostLastSeen?: number;
+  hostConnected?: boolean;
 }
 
 export interface QuizPack {
