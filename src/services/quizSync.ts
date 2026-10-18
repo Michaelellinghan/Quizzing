@@ -1,5 +1,5 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { GameRoom, Question, GamePhase, Player, Buzz, Submission } from '../types/quiz';
+import { GameRoom, Question, GamePhase, Buzz, Submission } from '../types/quiz';
 import { DEFAULT_QUIZ_PACKS } from '../data/defaultQuizPacks';
 import { soundEffects } from '../utils/soundEffects';
 import mqtt, { MqttClient } from 'mqtt';
@@ -18,14 +18,11 @@ function getBackendHttpUrl(): string {
   const envUrl = (import.meta as any).env?.VITE_BACKEND_URL;
   if (envUrl) return envUrl.replace(/\/$/, '');
   const currentHost = window.location.hostname;
-  if (currentHost.includes('netlify.app') || currentHost.includes('vercel.app')) {
-    // Proxied by netlify.toml or fallback to Cloud Run over standard Port 443 HTTPS
-    return window.location.origin;
-  }
   if (currentHost === 'localhost' || currentHost === '127.0.0.1') {
     return '';
   }
-  return `https://${CLOUD_RUN_HOST}`;
+  // Do not poll the ephemeral AI Studio preview backend on Netlify unless VITE_BACKEND_URL is explicitly configured
+  return '';
 }
 
 function createDefaultRoom(code: string): GameRoom {
@@ -96,7 +93,6 @@ export function reduceGameAction(
       }
       break;
     }
-
     case 'SET_PHASE': {
       const newPhase = payload?.phase as GamePhase;
       if (newPhase && ['LOBBY', 'QUESTION', 'REVEAL', 'ROUND_STATS', 'LEADERBOARD'].includes(newPhase)) {
@@ -117,7 +113,6 @@ export function reduceGameAction(
       }
       break;
     }
-
     case 'CHANGE_QUESTION': {
       const idx = payload?.index;
       if (typeof idx === 'number' && idx >= 0 && idx < updated.questions.length) {
@@ -131,7 +126,6 @@ export function reduceGameAction(
       }
       break;
     }
-
     case 'TOGGLE_LOCK': {
       const wasOpen = updated.inputOpen;
       updated.inputOpen = payload?.open ?? !updated.inputOpen;
@@ -143,14 +137,12 @@ export function reduceGameAction(
       }
       break;
     }
-
     case 'RESET_BUZZES': {
       updated.buzzes = [];
       updated.submissions = {};
       updated.questionStartTime = now;
       break;
     }
-
     case 'BUZZ_IN': {
       if (!playerId || !updated.inputOpen) break;
       if (!updated.buzzes.some((b) => b.playerId === playerId)) {
@@ -163,7 +155,6 @@ export function reduceGameAction(
           serverOrder: updated.buzzes.length + 1
         };
         updated.buzzes.push(newBuzz);
-
         const currentQ = updated.questions[updated.currentQIndex];
         if (currentQ) {
           if (!updated.questionHistory[currentQ.id]) {
@@ -171,20 +162,16 @@ export function reduceGameAction(
           }
           updated.questionHistory[currentQ.id].buzzTimes.push(newBuzz.elapsedMs);
         }
-
         updated.soundTrigger = { sound: 'buzzer', nonce: Math.random() };
       }
       break;
     }
-
     case 'SUBMIT_ANSWER': {
       if (!playerId) break;
       const answer = String(payload?.answer || '').trim();
       if (!answer) break;
-
       const elapsed = updated.questionStartTime > 0 ? now - updated.questionStartTime : 0;
       const currentQ = updated.questions[updated.currentQIndex];
-
       const cleanSubmitted = answer
         .toLowerCase()
         .replace(/^(the|a|an)\s+/i, '')
@@ -195,7 +182,6 @@ export function reduceGameAction(
         .replace(/^(the|a|an)\s+/i, '')
         .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '')
         .trim();
-
       let autoStatus: 'pending' | 'correct' | 'wrong' = 'pending';
       if (currentQ?.type === 'MCQ' && cleanOfficial) {
         autoStatus = cleanSubmitted === cleanOfficial ? 'correct' : 'wrong';
@@ -210,13 +196,10 @@ export function reduceGameAction(
           autoStatus = 'pending';
         }
       }
-
-      // Revert previous points if changing answer
       const prevSub = updated.submissions[playerId];
       if (prevSub && prevSub.status === 'correct' && updated.players[playerId]) {
         updated.players[playerId].score -= prevSub.pointsAwarded || currentQ?.points || 10;
       }
-
       const pointsAwarded = autoStatus === 'correct' ? currentQ?.points || 10 : 0;
       const subObj: Submission = {
         playerId,
@@ -228,8 +211,6 @@ export function reduceGameAction(
         pointsAwarded
       };
       updated.submissions[playerId] = subObj;
-
-      // Add to buzzes if not present
       if (!updated.buzzes.some((b) => b.playerId === playerId)) {
         updated.buzzes.push({
           playerId,
@@ -239,7 +220,6 @@ export function reduceGameAction(
           serverOrder: updated.buzzes.length + 1
         });
       }
-
       if (autoStatus === 'correct' && updated.players[playerId]) {
         updated.players[playerId].score += pointsAwarded;
         updated.players[playerId].streak += 1;
@@ -250,7 +230,6 @@ export function reduceGameAction(
       } else {
         updated.soundTrigger = { sound: 'ding', nonce: Math.random() };
       }
-
       if (currentQ) {
         if (!updated.questionHistory[currentQ.id]) {
           updated.questionHistory[currentQ.id] = { correctCount: 0, totalAttempts: 0, buzzTimes: [] };
@@ -262,12 +241,10 @@ export function reduceGameAction(
       }
       break;
     }
-
     case 'ADJUDICATE': {
       const targetPid = payload?.playerId;
       const status = payload?.status as 'correct' | 'wrong';
       const points = Number(payload?.points || 10);
-
       if (targetPid && updated.players[targetPid]) {
         if (status === 'correct') {
           updated.players[targetPid].score += points;
@@ -278,6 +255,289 @@ export function reduceGameAction(
           updated.players[targetPid].streak = 0;
           updated.soundTrigger = { sound: 'wrong', nonce: Math.random() };
         }
+        if (updated.submissions[targetPid]) {
+          updated.submissions[targetPid].status = status;
+          updated.submissions[targetPid].pointsAwarded = status === 'correct' ? points : 0;
+        }
+      }
+      break;
+    }
+    case 'ADJUST_SCORE': {
+      const targetPid = payload?.playerId;
+      const delta = Number(payload?.delta || 0);
+      if (targetPid && updated.players[targetPid]) {
+        updated.players[targetPid].score = Math.max(0, updated.players[targetPid].score + delta);
+      }
+      break;
+    }
+    case 'UPDATE_QUESTIONS': {
+      if (Array.isArray(payload?.questions)) {
+        updated.questions = payload.questions;
+        updated.currentPackTitle = payload?.packTitle || updated.currentPackTitle || 'Custom Pack';
+        updated.currentQIndex = 0;
+        updated.buzzes = [];
+        updated.submissions = {};
+        updated.phase = 'LOBBY';
+      }
+      break;
+    }
+    case 'ADD_QUESTION': {
+      const newQ = payload?.question;
+      if (newQ && newQ.question && newQ.answer) {
+        const questionObj: Question = {
+          id: newQ.id || `q_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
+          type: newQ.type || 'BUZZER',
+          category: newQ.category || 'Bonus Question',
+          question: newQ.question.trim(),
+          options: Array.isArray(newQ.options) ? newQ.options : [],
+          answer: newQ.answer.trim(),
+          points: Number(newQ.points) || 10,
+          mediaType: newQ.mediaType || 'none',
+          mediaUrl: newQ.mediaUrl || undefined,
+          explanation: newQ.explanation || undefined,
+          hint: newQ.hint || undefined
+        };
+        const insertAt = payload?.insertAt;
+        if (typeof insertAt === 'number' && insertAt >= 0 && insertAt <= updated.questions.length) {
+          updated.questions.splice(insertAt, 0, questionObj);
+        } else {
+          updated.questions.push(questionObj);
+        }
+      }
+      break;
+    }
+    case 'EDIT_QUESTION': {
+      const qIndex = payload?.index;
+      const qData = payload?.question;
+      if (typeof qIndex === 'number' && qIndex >= 0 && qIndex < updated.questions.length && qData) {
+        updated.questions[qIndex] = {
+          ...updated.questions[qIndex],
+          ...qData
+        };
+      }
+      break;
+    }
+    case 'DELETE_QUESTION': {
+      const delIndex = payload?.index;
+      if (typeof delIndex === 'number' && delIndex >= 0 && delIndex < updated.questions.length) {
+        updated.questions.splice(delIndex, 1);
+        if (updated.currentQIndex >= updated.questions.length) {
+          updated.currentQIndex = Math.max(0, updated.questions.length - 1);
+        }
+      }
+      break;
+    }
+    case 'TRIGGER_SOUND': {
+      updated.soundTrigger = { sound: payload?.sound || 'ding', nonce: Math.random() };
+      break;
+    }
+    case 'KICK_PLAYER': {
+      const kickId = payload?.playerId;
+      if (kickId && updated.players[kickId]) {
+        delete updated.players[kickId];
+        updated.buzzes = updated.buzzes.filter((b) => b.playerId !== kickId);
+        delete updated.submissions[kickId];
+      }
+      break;
+    }
+    default:
+      break;
+  }
+  updated.lastUpdated = now;
+  return updated;
+}
+
+export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyncProps) {
+  const normalizedCode = (roomCode || 'QUIZ').trim().toUpperCase();
+
+  const [room, setRoom] = useState<GameRoom>(() => {
+    try {
+      const saved = localStorage.getItem(`quizcast_room_${normalizedCode}`);
+      if (saved) {
+        const parsed = JSON.parse(saved);
+        if (parsed && Array.isArray(parsed.questions) && parsed.questions.length > 0) {
+          return {
+            ...parsed,
+            revision: parsed.revision || 1
+          };
+        }
+      }
+    } catch (e) {}
+    return createDefaultRoom(normalizedCode);
+  });
+
+  const [connected, setConnected] = useState<boolean>(false);
+  const [latencyMs, setLatencyMs] = useState<number>(0);
+
+  const mqttClientRef = useRef<MqttClient | null>(null);
+  const eventSourceRef = useRef<EventSource | null>(null);
+  const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
+  const lastSoundNonceRef = useRef<number>(0);
+  const processedNoncesRef = useRef<Set<string>>(new Set());
+  const roomRef = useRef<GameRoom>(room);
+  roomRef.current = room;
+
+  useEffect(() => {
+    if (room) {
+      try {
+        localStorage.setItem(`quizcast_room_${normalizedCode}`, JSON.stringify(room));
+      } catch (e) {}
+    }
+  }, [room, normalizedCode]);
+
+  // Master Room State Update (prevents stale revision 1 tabs from overwriting active games)
+  const applyRoomState = useCallback((incoming: Partial<GameRoom>, force = false) => {
+    if (!incoming) return;
+    const current = roomRef.current;
+    const currentRev = current.revision || 1;
+    const incomingRev = incoming.revision || 1;
+    const currentPlayersCount = Object.keys(current.players || {}).length;
+    const incomingPlayersCount = Object.keys(incoming.players || {}).length;
+
+    const shouldApply =
+      force ||
+      incomingRev > currentRev ||
+      (incomingRev === currentRev && incomingPlayersCount > currentPlayersCount);
+
+    if (shouldApply) {
+      const mergedRoom: GameRoom = {
+        ...current,
+        ...incoming,
+        // Preserve existing questions if lightweight sync omitted them
+        questions:
+          Array.isArray(incoming.questions) && incoming.questions.length > 0
+            ? incoming.questions
+            : current.questions
+      };
+
+      setRoom(mergedRoom);
+
+      if (mergedRoom.soundTrigger && mergedRoom.soundTrigger.nonce !== lastSoundNonceRef.current) {
+        lastSoundNonceRef.current = mergedRoom.soundTrigger.nonce;
+        soundEffects.play(mergedRoom.soundTrigger.sound);
+      }
+
+      if (broadcastChannelRef.current) {
+        try {
+          broadcastChannelRef.current.postMessage({
+            type: 'SYNC_ROOM',
+            roomCode: normalizedCode,
+            room: mergedRoom,
+            revision: mergedRoom.revision
+          });
+        } catch (e) {}
+      }
+    }
+  }, [normalizedCode]);
+
+  // Unified multi-transport publisher
+  const publishToNetwork = useCallback((msg: any, options?: { skipNtfy?: boolean }) => {
+    const rawJson = JSON.stringify(msg);
+    const mqttTopic = `quizcast_mesh_v5_${normalizedCode}`;
+    const httpTopic = `quizcast_ntfy_v5_${normalizedCode.toLowerCase()}`;
+
+    // 1. MQTT Cloud Publish (Full payload)
+    if (mqttClientRef.current && mqttClientRef.current.connected) {
+      try {
+        mqttClientRef.current.publish(mqttTopic, rawJson, { qos: 0 });
+      } catch (e) {}
+    }
+
+    // 2. HTTPS / SSE Relay Publish via ntfy.sh (Port 443)
+    // Skip routine heartbeats to avoid HTTP 429 rate limits, and keep SYNC_ROOM under 4KB
+    if (!options?.skipNtfy && msg.type !== 'HEARTBEAT') {
+      try {
+        let ntfyBody = rawJson;
+        if (msg.type === 'SYNC_ROOM' && msg.room && rawJson.length > 3500) {
+          // Strip bulky static questions array so ntfy.sh doesn't turn >4KB payload into a file attachment
+          const { questions, ...lightweightRoom } = msg.room;
+          ntfyBody = JSON.stringify({
+            ...msg,
+            room: lightweightRoom
+          });
+        }
+        fetch(`https://ntfy.sh/${httpTopic}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
+          body: ntfyBody,
+          mode: 'cors'
+        }).catch(() => {});
+      } catch (e) {}
+    }
+
+    // 3. BroadcastChannel (Same-device instant sync)
+    if (broadcastChannelRef.current) {
+      try {
+        broadcastChannelRef.current.postMessage(msg);
+      } catch (e) {}
+    }
+
+    // 4. Optional Express REST API (only if VITE_BACKEND_URL is explicitly configured)
+    const apiBase = getBackendHttpUrl();
+    if (apiBase && (msg.type === 'PLAYER_ACTION' || msg.type === 'HOST_ACTION' || msg.type === 'PLAYER_JOIN')) {
+      const actionPayload =
+        msg.type === 'PLAYER_JOIN'
+          ? { type: 'JOIN_ROOM', playerId: msg.playerId, playerName: msg.playerName, role: 'player' }
+          : msg.action;
+      if (actionPayload) {
+        try {
+          fetch(`${apiBase}/api/room/${normalizedCode}/action`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({
+              ...actionPayload,
+              roomCode: normalizedCode
+            })
+          }).catch(() => {});
+        } catch (e) {}
+      }
+    }
+  }, [normalizedCode]);
+
+  useEffect(() => {
+    if (!role) return;
+    let isCleanedUp = false;
+    const mqttTopic = `quizcast_mesh_v5_${normalizedCode}`;
+    const httpTopic = `quizcast_ntfy_v5_${normalizedCode.toLowerCase()}`;
+    const pingStart = Date.now();
+
+    const isDuplicate = (nonce?: string) => {
+      if (!nonce) return false;
+      if (processedNoncesRef.current.has(nonce)) return true;
+      processedNoncesRef.current.add(nonce);
+      if (processedNoncesRef.current.size > 200) {
+        const arr = Array.from(processedNoncesRef.current);
+        processedNoncesRef.current = new Set(arr.slice(50));
+      }
+      return false;
+    };
+
+    const handleNetworkMessage = (data: any) => {
+      if (isCleanedUp || !data || !data.type) return;
+      if (data.roomCode && data.roomCode !== normalizedCode) return;
+      if (data.nonce && isDuplicate(data.nonce)) return;
+
+      const isAuthority = role === 'tv' || role === 'host';
+
+      switch (data.type) {
+        case 'PLAYER_JOIN':
+        case 'REQUEST_ROOM_SYNC': {
+          if (isAuthority) {
+            let current = roomRef.current;
+            if (data.playerId && data.type === 'PLAYER_JOIN') {
+              current = reduceGameAction(current, {
+                type: 'JOIN_ROOM',
+                playerId: data.playerId,
+                playerName: data.playerName || 'Player',
+                role: 'player'
+              });
+              applyRoomState(current, true);
+            }
+            // Reply with current room state if we have players or a revision > 1 (or if a player joined)
+            if (data.type === 'PLAYER_JOIN' || (current.revision || 1) >= (data.revision || 1)) {
+              publishToNetwork({
+                type: 'SYNC_ROOM',
+     }
 
         if (updated.submissions[targetPid]) {
           updated.submissions[targetPid].status = status;
