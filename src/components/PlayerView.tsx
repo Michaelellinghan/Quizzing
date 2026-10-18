@@ -1,7 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { GameRoom, Question } from '../types/quiz';
 import { soundEffects } from '../utils/soundEffects';
-import { Zap, Flame, Trophy, Lock, CheckCircle2, XCircle, Send, Radio } from 'lucide-react';
+import { Zap, Flame, Trophy, Lock, CheckCircle2, XCircle, Send, Radio, Edit3, Check, User } from 'lucide-react';
 
 interface PlayerViewProps {
   room: GameRoom;
@@ -10,6 +10,7 @@ interface PlayerViewProps {
   onBuzzIn: () => void;
   onSubmitAnswer: (answer: string) => void;
   latencyMs: number;
+  onUpdatePlayerName?: (newName: string) => void;
 }
 
 export const PlayerView: React.FC<PlayerViewProps> = ({
@@ -18,11 +19,16 @@ export const PlayerView: React.FC<PlayerViewProps> = ({
   playerName,
   onBuzzIn,
   onSubmitAnswer,
-  latencyMs
+  latencyMs,
+  onUpdatePlayerName
 }) => {
   const [textAnswer, setTextAnswer] = useState<string>('');
   const [selectedOption, setSelectedOption] = useState<string | null>(null);
   const [buzzerActiveAnim, setBuzzerActiveAnim] = useState<boolean>(false);
+  const [isEditingName, setIsEditingName] = useState<boolean>(() => {
+    return !playerName || playerName === 'Player' || !localStorage.getItem('quizcast_player_name');
+  });
+  const [nameInput, setNameInput] = useState<string>(playerName === 'Player' ? '' : playerName);
 
   const player = room.players[playerId];
   const currentQ: Question | undefined = room.questions[room.currentQIndex];

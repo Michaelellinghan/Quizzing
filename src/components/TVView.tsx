@@ -20,7 +20,11 @@ import {
   Sparkles,
   ArrowRight,
   Tv,
-  X
+  X,
+  Smartphone,
+  Copy,
+  Check,
+  ExternalLink
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -45,6 +49,7 @@ export const TVView: React.FC<TVViewProps> = ({
   const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
   const [aspectRatioMode, setAspectRatioMode] = useState<'16-9-fit' | 'fill'>('16-9-fit');
   const [showQrModal, setShowQrModal] = useState<boolean>(false);
+  const [copiedUrl, setCopiedUrl] = useState<boolean>(false);
 
   const currentQ: Question | undefined = room.questions[room.currentQIndex];
   const sortedPlayers = Object.values(room.players || {}).sort((a, b) => b.score - a.score);
@@ -62,6 +67,20 @@ export const TVView: React.FC<TVViewProps> = ({
   // Listen for audio unlock
   useEffect(() => {
     soundEffects.onUnlock(() => setAudioUnlocked(true));
+  }, []);
+
+  // Keyboard shortcut: Press 'Q' anywhere on TV to toggle full-screen join QR code
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      if (['INPUT', 'TEXTAREA'].includes((e.target as HTMLElement)?.tagName)) return;
+      if (e.key === 'q' || e.key === 'Q') {
+        setShowQrModal((prev) => !prev);
+      } else if (e.key === 'Escape') {
+        setShowQrModal(false);
+      }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
   }, []);
 
   const handleEnableAudio = () => {
@@ -87,11 +106,32 @@ export const TVView: React.FC<TVViewProps> = ({
     }
   };
 
-  // Generate QR code for mobile join
+  // Dynamic Join URLs
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const pathname = typeof window !== 'undefined' ? window.location.pathname.replace(/\/$/, '') : '';
+  const host = typeof window !== 'undefined' ? window.location.host : '';
+  const joinUrl = `${origin}${pathname}/?room=${encodeURIComponent(room.code)}&role=player`;
+  const displayUrl = `${host}${pathname}/?room=${room.code}`;
+
+  const handleCopyLink = (e?: React.MouseEvent) => {
+    if (e) e.stopPropagation();
+    if (navigator?.clipboard) {
+      navigator.clipboard.writeText(joinUrl);
+      setCopiedUrl(true);
+      setTimeout(() => setCopiedUrl(false), 2200);
+    }
+  };
+
+  // High-Resolution & High-Error-Correction QR Code Generation for TV distances
   useEffect(() => {
-    const joinUrl = `${window.location.origin}/?room=${room.code}&role=player`;
-    generateQrDataUrl(joinUrl).then((url) => setQrCodeUrl(url));
-  }, [room.code]);
+    generateQrDataUrl(joinUrl, {
+      width: 520,
+      margin: 1,
+      darkColor: '#090d16',
+      lightColor: '#ffffff',
+      errorCorrectionLevel: 'H'
+    }).then((url) => setQrCodeUrl(url));
+  }, [joinUrl]);
 
   // Launch confetti on reveal or game victory
   useEffect(() => {
@@ -240,27 +280,78 @@ export const TVView: React.FC<TVViewProps> = ({
                     {room.currentPackTitle}
                   </p>
 
-                  {/* QR Card */}
-                  <div className="bg-slate-950 border border-slate-700/80 p-4 sm:p-5 rounded-2xl shadow-xl flex items-center gap-5 max-w-md">
-                    {qrCodeUrl ? (
-                      <div className="bg-white p-2 rounded-xl shrink-0 shadow-md">
-                        <img src={qrCodeUrl} alt="Join QR Code" className="w-28 h-28 sm:w-36 sm:h-36 object-contain" />
-                      </div>
-                    ) : (
-                      <div className="w-28 h-28 sm:w-36 sm:h-36 bg-slate-800 rounded-xl flex items-center justify-center">
-                        <QrCode className="w-10 h-10 text-slate-500 animate-pulse" />
-                      </div>
-                    )}
+                  {/* Dynamic Broadcast-Grade QR Card */}
+                  <div
+                    onClick={() => setShowQrModal(true)}
+                    className="bg-slate-950/95 border-2 border-slate-700/80 hover:border-amber-400/80 p-4 sm:p-5 rounded-3xl shadow-[0_10px_35px_rgba(0,0,0,0.6)] flex flex-col sm:flex-row items-center gap-5 max-w-lg cursor-pointer group transition-all relative overflow-hidden"
+                  >
+                    {/* Glowing highlight */}
+                    <div className="absolute top-0 right-0 w-32 h-32 bg-amber-500/10 rounded-full blur-2xl pointer-events-none" />
 
-                    <div className="text-left flex flex-col gap-1.5">
-                      <div className="text-[11px] uppercase font-extrabold tracking-wider text-slate-400">
-                        Scan with Phone Camera
+                    {/* QR Code Container with Viewfinder Framing */}
+                    <div className="relative p-2.5 bg-white rounded-2xl shadow-xl shrink-0 group-hover:scale-102 transition">
+                      {/* Viewfinder corner brackets */}
+                      <div className="absolute -top-1 -left-1 w-3 h-3 border-t-2 border-l-2 border-amber-500 pointer-events-none" />
+                      <div className="absolute -top-1 -right-1 w-3 h-3 border-t-2 border-r-2 border-amber-500 pointer-events-none" />
+                      <div className="absolute -bottom-1 -left-1 w-3 h-3 border-b-2 border-l-2 border-amber-500 pointer-events-none" />
+                      <div className="absolute -bottom-1 -right-1 w-3 h-3 border-b-2 border-r-2 border-amber-500 pointer-events-none" />
+
+                      {qrCodeUrl ? (
+                        <div className="relative overflow-hidden rounded-xl">
+                          <img src={qrCodeUrl} alt="Join QR Code" className="w-28 h-28 sm:w-36 sm:h-36 object-contain" />
+                          <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-amber-400 to-transparent top-0 animate-pulse pointer-events-none" />
+                        </div>
+                      ) : (
+                        <div className="w-28 h-28 sm:w-36 sm:h-36 bg-slate-900 rounded-xl flex items-center justify-center">
+                          <QrCode className="w-10 h-10 text-slate-500 animate-pulse" />
+                        </div>
+                      )}
+                    </div>
+
+                    <div className="text-left flex flex-col gap-2 min-w-0 flex-1">
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="text-[10px] font-black uppercase tracking-wider text-amber-400 flex items-center gap-1">
+                          <Smartphone className="w-3.5 h-3.5" /> Scan to Join TV Game
+                        </span>
+                        <span className="text-[10px] text-slate-400 font-mono bg-slate-900 px-2 py-0.5 rounded border border-slate-800">
+                          Press Q
+                        </span>
                       </div>
-                      <div className="text-lg sm:text-xl font-extrabold text-white">
-                        Room: <span className="font-mono text-amber-400 tracking-wider bg-slate-900 px-2.5 py-0.5 rounded-lg border border-slate-700">{room.code}</span>
+
+                      <div className="text-base sm:text-xl font-black text-white flex items-center gap-2">
+                        <span>Room:</span>
+                        <span className="font-mono text-amber-400 font-black tracking-widest bg-slate-900 px-3 py-1 rounded-xl border border-slate-700 shadow-inner">
+                          {room.code}
+                        </span>
                       </div>
-                      <p className="text-xs text-slate-400 leading-tight">
-                        Point camera to buzz in & play on your mobile handset.
+
+                      {/* Direct URL pill with 1-click copy */}
+                      <div className="flex items-center gap-1.5 pt-1">
+                        <button
+                          type="button"
+                          onClick={handleCopyLink}
+                          className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-300 text-[11px] font-medium transition max-w-[220px] truncate"
+                          title="Click to copy join link"
+                        >
+                          {copiedUrl ? <Check className="w-3 h-3 text-emerald-400 shrink-0" /> : <Copy className="w-3 h-3 text-slate-400 shrink-0" />}
+                          <span className="truncate">{displayUrl}</span>
+                        </button>
+
+                        <button
+                          type="button"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            window.open(joinUrl, '_blank');
+                          }}
+                          className="p-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-700 text-slate-400 hover:text-white transition shrink-0"
+                          title="Test player handset in new tab"
+                        >
+                          <ExternalLink className="w-3.5 h-3.5" />
+                        </button>
+                      </div>
+
+                      <p className="text-[11px] text-slate-400 leading-tight">
+                        Point your camera to buzz in & play live on your phone.
                       </p>
                     </div>
                   </div>
@@ -699,52 +790,142 @@ export const TVView: React.FC<TVViewProps> = ({
             </div>
           </div>
 
+          {/* Docked Dynamic QR Join Widget (Always available for mid-game arrivals) */}
+          <div
+            onClick={() => setShowQrModal(true)}
+            className="bg-slate-900/95 border border-slate-800 hover:border-amber-400/80 rounded-2xl p-2.5 shadow-lg flex items-center justify-between gap-2.5 cursor-pointer group transition shrink-0"
+            title="Click or press 'Q' to expand Join QR Code on TV"
+          >
+            <div className="flex items-center gap-2.5 min-w-0">
+              <div className="relative p-1 bg-white rounded-xl shadow-sm shrink-0 group-hover:scale-105 transition overflow-hidden">
+                {qrCodeUrl ? (
+                  <img src={qrCodeUrl} alt="Join QR Code" className="w-10 h-10 object-contain" />
+                ) : (
+                  <QrCode className="w-10 h-10 text-slate-900" />
+                )}
+                <div className="absolute inset-x-0 h-0.5 bg-amber-500 top-0 animate-pulse pointer-events-none" />
+              </div>
+              <div className="min-w-0 text-left">
+                <div className="text-[10px] font-black uppercase tracking-wider text-amber-400 flex items-center gap-1">
+                  <Smartphone className="w-3 h-3 text-amber-400" />
+                  <span>Join On Phone</span>
+                </div>
+                <div className="text-xs font-mono font-bold text-white truncate">
+                  Room: <span className="text-amber-400 font-black">{room.code}</span>
+                </div>
+              </div>
+            </div>
+
+            <span className="px-2 py-1 rounded-lg bg-slate-800 group-hover:bg-amber-500 group-hover:text-slate-950 text-slate-300 text-[10px] font-black transition flex items-center gap-1 shrink-0">
+              <Maximize2 className="w-3 h-3" /> Q
+            </span>
+          </div>
+
         </div>
 
       </div>
 
-      {/* Pop-up Mobile Join QR Modal on TV */}
+      {/* Cinematic TV Mobile Join QR Showcase Modal */}
       {showQrModal && (
         <div
-          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md animate-fade-in"
+          className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-950/90 backdrop-blur-md animate-fade-in"
           onClick={() => setShowQrModal(false)}
         >
           <div
-            className="bg-slate-900 border-2 border-amber-400/80 p-6 sm:p-8 rounded-3xl shadow-[0_0_60px_rgba(245,158,11,0.3)] flex flex-col items-center gap-4 max-w-sm text-center"
+            className="bg-slate-900 border-2 border-amber-400/80 p-6 sm:p-8 rounded-3xl shadow-[0_0_80px_rgba(245,158,11,0.25)] flex flex-col md:flex-row items-center gap-6 sm:gap-8 max-w-2xl w-full text-center md:text-left relative"
             onClick={(e) => e.stopPropagation()}
           >
-            <div className="flex items-center justify-between w-full">
-              <span className="text-xs font-black uppercase tracking-wider text-amber-400 flex items-center gap-1.5">
-                <QrCode className="w-4 h-4" /> Scan to Join TV Game
-              </span>
-              <button
-                onClick={() => setShowQrModal(false)}
-                className="p-1 rounded-lg bg-slate-800 text-slate-400 hover:text-white cursor-pointer"
-              >
-                <X className="w-4 h-4" />
-              </button>
+            {/* Close button */}
+            <button
+              onClick={() => setShowQrModal(false)}
+              className="absolute top-4 right-4 p-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white transition cursor-pointer"
+              title="Close (Esc or Q)"
+            >
+              <X className="w-5 h-5" />
+            </button>
+
+            {/* Left: Viewfinder QR Code Stage */}
+            <div className="relative p-3.5 bg-white rounded-3xl shadow-2xl shrink-0">
+              {/* Corner targeting reticles */}
+              <div className="absolute -top-1.5 -left-1.5 w-4 h-4 border-t-3 border-l-3 border-amber-500 pointer-events-none" />
+              <div className="absolute -top-1.5 -right-1.5 w-4 h-4 border-t-3 border-r-3 border-amber-500 pointer-events-none" />
+              <div className="absolute -bottom-1.5 -left-1.5 w-4 h-4 border-b-3 border-l-3 border-amber-500 pointer-events-none" />
+              <div className="absolute -bottom-1.5 -right-1.5 w-4 h-4 border-b-3 border-r-3 border-amber-500 pointer-events-none" />
+
+              {qrCodeUrl ? (
+                <div className="relative overflow-hidden rounded-2xl">
+                  <img
+                    src={qrCodeUrl}
+                    alt="Join QR Code"
+                    className="w-52 h-52 sm:w-64 sm:h-64 object-contain"
+                  />
+                  {/* High-tech scanning laser line */}
+                  <div className="absolute inset-x-0 h-1 bg-gradient-to-r from-transparent via-amber-400 to-transparent top-0 animate-pulse pointer-events-none" />
+                </div>
+              ) : (
+                <div className="w-52 h-52 sm:w-64 sm:h-64 bg-slate-900 rounded-2xl flex items-center justify-center">
+                  <QrCode className="w-16 h-16 text-slate-500 animate-pulse" />
+                </div>
+              )}
             </div>
 
-            {qrCodeUrl ? (
-              <div className="bg-white p-3 rounded-2xl shadow-xl">
-                <img src={qrCodeUrl} alt="Join QR Code" className="w-52 h-52 sm:w-60 sm:h-60 object-contain" />
+            {/* Right: Join Instructions & Direct Links */}
+            <div className="flex-1 flex flex-col gap-3 min-w-0">
+              <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-500/10 border border-amber-500/30 text-amber-400 font-extrabold text-xs uppercase tracking-widest w-fit mx-auto md:mx-0">
+                <Smartphone className="w-3.5 h-3.5" /> Mobile Handset Controller
               </div>
-            ) : (
-              <div className="w-52 h-52 bg-slate-800 rounded-2xl flex items-center justify-center">
-                <QrCode className="w-16 h-16 text-slate-500 animate-pulse" />
-              </div>
-            )}
 
-            <div className="text-xl sm:text-2xl font-black text-white">
-              Room Code:{' '}
-              <span className="font-mono text-amber-400 bg-slate-950 px-3 py-1 rounded-xl border border-slate-700">
-                {room.code}
-              </span>
+              <h2 className="text-2xl sm:text-3xl font-black text-white tracking-tight">
+                Scan with Camera
+              </h2>
+
+              <div className="flex items-center justify-center md:justify-start gap-2 text-sm sm:text-base font-bold text-slate-300">
+                <span>Room Code:</span>
+                <span className="font-mono text-xl sm:text-2xl text-amber-400 font-black tracking-widest bg-slate-950 px-3.5 py-1 rounded-xl border border-slate-700 shadow-inner">
+                  {room.code}
+                </span>
+              </div>
+
+              {/* URL with 1-click copy */}
+              <div className="p-3 rounded-2xl bg-slate-950 border border-slate-800 flex flex-col gap-1.5 text-xs text-slate-400">
+                <span className="text-[10px] font-bold uppercase tracking-wider text-slate-500">
+                  Or enter web address on phone:
+                </span>
+                <div className="flex items-center gap-2">
+                  <span className="font-mono text-white text-xs truncate flex-1 font-semibold select-all">
+                    {displayUrl}
+                  </span>
+                  <button
+                    type="button"
+                    onClick={handleCopyLink}
+                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-amber-400 text-xs font-bold transition flex items-center gap-1 shrink-0"
+                    title="Copy full join URL"
+                  >
+                    {copiedUrl ? <Check className="w-3.5 h-3.5 text-emerald-400" /> : <Copy className="w-3.5 h-3.5" />}
+                    <span>{copiedUrl ? 'Copied' : 'Copy'}</span>
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => window.open(joinUrl, '_blank')}
+                    className="p-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition shrink-0"
+                    title="Open test handset in new tab"
+                  >
+                    <ExternalLink className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              </div>
+
+              {/* Roster count */}
+              <div className="flex items-center justify-between text-xs text-slate-400 pt-1 border-t border-slate-800/80">
+                <span className="flex items-center gap-1.5 font-bold text-white">
+                  <span className="w-2 h-2 rounded-full bg-emerald-400 animate-pulse" />
+                  {sortedPlayers.length} {sortedPlayers.length === 1 ? 'Player' : 'Players'} connected
+                </span>
+                <span className="text-slate-500 text-[11px]">
+                  Press <kbd className="px-1.5 py-0.5 rounded bg-slate-800 font-mono text-amber-400 text-[10px]">Q</kbd> to close
+                </span>
+              </div>
             </div>
-
-            <p className="text-xs text-slate-300 leading-relaxed">
-              Scan with your smartphone camera to connect instantly. Your phone becomes your buzzer and answer pad!
-            </p>
           </div>
         </div>
       )}

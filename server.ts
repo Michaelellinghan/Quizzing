@@ -152,50 +152,49 @@ function broadcastToRoom(roomCode: string, actionType: string, payload?: any) {
   }
 }
 
-// ---------------- WEBSOCKET HANDLING ----------------
-wss.on('connection', (ws: WebSocket & { roomCode?: string; clientId?: string; role?: string }) => {
-  ws.on('message', (data: string) => {
-    try {
-      const msg = JSON.parse(data.toString());
-      const { type, roomCode = 'QUIZ', playerId, playerName, role, payload } = msg;
-      const normalizedCode = (roomCode || 'QUIZ').trim().toUpperCase();
-      const room = getOrCreateRoom(normalizedCode);
+// ---------------- GAME ACTION PROCESSING (Shared by WebSocket & REST API) ----------------
+export function processRoomAction(action: {
+  type: string;
+  roomCode?: string;
+  playerId?: string;
+  playerName?: string;
+  role?: string;
+  payload?: any;
+}): GameRoom {
+  const { type, roomCode = 'QUIZ', playerId, playerName, role, payload } = action;
+  const normalizedCode = (roomCode || 'QUIZ').trim().toUpperCase();
+  const room = getOrCreateRoom(normalizedCode);
+  const now = Date.now();
 
-      if (!roomClients[normalizedCode]) {
-        roomClients[normalizedCode] = new Set();
-      }
-      roomClients[normalizedCode].add(ws);
-      ws.roomCode = normalizedCode;
-      ws.clientId = playerId;
-      ws.role = role;
-
-      const now = Date.now();
-
-      switch (type) {
-        case 'JOIN_ROOM': {
-          if (role === 'player' && playerId && playerName) {
-            if (!room.players[playerId]) {
-              room.players[playerId] = {
-                id: playerId,
-                name: playerName.trim(),
-                score: 0,
-                streak: 0,
-                connected: true,
-                avatar: `avatar-${(Object.keys(room.players).length % 8) + 1}`
-              };
-            } else {
-              room.players[playerId].connected = true;
-              room.players[playerId].name = playerName.trim();
-            }
+  try {
+    switch (type) {
+    case 'JOIN_ROOM': {
+      if (role === 'player' && playerId) {
+        const cleanName = (playerName || 'Player').trim();
+        if (!room.players[playerId]) {
+          room.players[playerId] = {
+            id: playerId,
+            name: cleanName,
+            score: 0,
+            streak: 0,
+            connected: true,
+            avatar: `avatar-${(Object.keys(room.players).length % 8) + 1}`
+          };
+        } else {
+          room.players[playerId].connected = true;
+          if (cleanName && cleanName !== 'Player') {
+            room.players[playerId].name = cleanName;
           }
-          room.lastUpdated = now;
-          broadcastToRoom(normalizedCode, 'ROOM_UPDATED');
-          break;
         }
+      }
+      room.lastUpdated = now;
+      broadcastToRoom(normalizedCode, 'ROOM_UPDATED');
+      break;
+    }
 
         case 'BUZZ_IN': {
-          if (!room.inputOpen) return;
-          if (!playerId) return;
+          if (!room.inputOpen) return room;
+          if (!playerId) return room;
 
           // Check if already buzzed for this question
           const alreadyBuzzed = room.buzzes.some(b => b.playerId === playerId);
@@ -229,9 +228,9 @@ wss.on('connection', (ws: WebSocket & { roomCode?: string; clientId?: string; ro
         }
 
         case 'SUBMIT_ANSWER': {
-          if (!playerId) return;
+          if (!playerId) return room;
           const answer = String(payload?.answer || '').trim();
-          if (!answer) return;
+          if (!answer) return room;
 
           const elapsed = room.questionStartTime > 0 ? now - room.questionStartTime : 0;
           const currentQ = room.questions[room.currentQIndex];
@@ -508,6 +507,29 @@ wss.on('connection', (ws: WebSocket & { roomCode?: string; clientId?: string; ro
         default:
           break;
       }
+    } catch (err) {
+      console.error('Error in processRoomAction:', err);
+    }
+
+    return room;
+  }
+
+// ---------------- WEBSOCKET HANDLING ----------------
+wss.on('connection', (ws: WebSocket & { roomCode?: string; clientId?: string; role?: string }) => {
+  ws.on('message', (data: string) => {
+    try {
+      const msg = JSON.parse(data.toString());
+      const normalizedCode = (msg.roomCode || 'QUIZ').trim().toUpperCase();
+
+      if (!roomClients[normalizedCode]) {
+        roomClients[normalizedCode] = new Set();
+      }
+      roomClients[normalizedCode].add(ws);
+      ws.roomCode = normalizedCode;
+      ws.clientId = msg.playerId;
+      ws.role = msg.role;
+
+      processRoomAction(msg);
     } catch (e) {
       console.error('WS parsing error:', e);
     }
@@ -529,11 +551,29 @@ wss.on('connection', (ws: WebSocket & { roomCode?: string; clientId?: string; ro
 
 // ---------------- REST API ROUTES ----------------
 
-// Get room state
+// Get room state (polled by TV and mobile clients)
 app.get('/api/room/:code', (req, res) => {
   const code = (req.params.code || 'QUIZ').trim().toUpperCase();
   const room = getOrCreateRoom(code);
+  res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
   res.json({ success: true, room });
+});
+
+// Post game action (immediate fallback when WebSockets are blocked or delayed)
+app.post('/api/room/:code/action', (req, res) => {
+  try {
+    const code = (req.params.code || req.body?.roomCode || 'QUIZ').trim().toUpperCase();
+    const action = {
+      ...req.body,
+      roomCode: code
+    };
+    const updatedRoom = processRoomAction(action);
+    res.setHeader('Cache-Control', 'no-cache, no-store, must-revalidate');
+    res.json({ success: true, room: updatedRoom });
+  } catch (err: any) {
+    console.error('Error executing REST action:', err);
+    res.status(500).json({ success: false, error: err.message });
+  }
 });
 
 // Update questions or init pack

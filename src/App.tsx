@@ -176,6 +176,10 @@ export default function App() {
             onBuzzIn={buzzIn}
             onSubmitAnswer={submitAnswer}
             latencyMs={latencyMs}
+            onUpdatePlayerName={(newName: string) => {
+              setPlayerName(newName);
+              localStorage.setItem('quizcast_player_name', newName);
+            }}
           />
         )}
       </main>

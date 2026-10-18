@@ -69,11 +69,12 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
     return createDefaultRoom(normalizedCode);
   });
 
-  const [connected, setConnected] = useState<boolean>(false);
+  const [connected, setConnected] = useState<boolean>(true);
   const [latencyMs, setLatencyMs] = useState<number>(0);
   const socketRef = useRef<WebSocket | null>(null);
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
   const lastSoundNonceRef = useRef<number>(0);
+  const lastKnownUpdatedRef = useRef<number>(0);
 
   // Sync to localStorage
   useEffect(() => {
@@ -88,7 +89,7 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
   const loadInitialQuestions = useCallback(async () => {
     try {
       const apiBase = getBackendHttpUrl();
-      const res = await fetch(`${apiBase}/api/room/${normalizedCode}`);
+      const res = await fetch(`${apiBase}/api/room/${normalizedCode}`, { cache: 'no-store' });
       if (res.ok) {
         const data = await res.json();
         if (data.room) {
@@ -103,7 +104,10 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
               })
             }).catch(() => {});
           }
-          setRoom(data.room);
+          if (data.room.lastUpdated >= lastKnownUpdatedRef.current) {
+            lastKnownUpdatedRef.current = data.room.lastUpdated;
+            setRoom(data.room);
+          }
         }
       }
     } catch (e) {
@@ -111,22 +115,48 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
     }
   }, [normalizedCode]);
 
-  // Connect to WebSocket & BroadcastChannel
+  // Connect to WebSocket, BroadcastChannel, and Active HTTP Polling Fallback
   useEffect(() => {
     if (!role) return;
 
     loadInitialQuestions();
 
-    // BroadcastChannel for instant local cross-tab fallback
+    const apiBase = getBackendHttpUrl();
+
+    // 1. Immediately register via REST API to ensure phone join is registered instantly
+    fetch(`${apiBase}/api/room/${normalizedCode}/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        type: 'JOIN_ROOM',
+        roomCode: normalizedCode,
+        role,
+        playerId,
+        playerName: playerName || 'Player'
+      })
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.room) {
+          lastKnownUpdatedRef.current = data.room.lastUpdated;
+          setRoom(data.room);
+        }
+      })
+      .catch(() => {});
+
+    // 2. BroadcastChannel for instant local cross-tab sync (e.g. Host + TV on same computer)
     try {
       const bc = new BroadcastChannel(`quizcast_${normalizedCode}`);
       broadcastChannelRef.current = bc;
       bc.onmessage = (event) => {
         if (event.data?.type === 'ROOM_SYNC' && event.data.room) {
-          setRoom(event.data.room);
-          if (event.data.room.soundTrigger && event.data.room.soundTrigger.nonce !== lastSoundNonceRef.current) {
-            lastSoundNonceRef.current = event.data.room.soundTrigger.nonce;
-            soundEffects.play(event.data.room.soundTrigger.sound);
+          if (event.data.room.lastUpdated >= lastKnownUpdatedRef.current) {
+            lastKnownUpdatedRef.current = event.data.room.lastUpdated;
+            setRoom(event.data.room);
+            if (event.data.room.soundTrigger && event.data.room.soundTrigger.nonce !== lastSoundNonceRef.current) {
+              lastSoundNonceRef.current = event.data.room.soundTrigger.nonce;
+              soundEffects.play(event.data.room.soundTrigger.sound);
+            }
           }
         }
       };
@@ -134,9 +164,47 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
       console.warn('BroadcastChannel not supported', e);
     }
 
+    // 3. Robust Background Polling: Guarantees TV and Phone stay 100% in sync even if WebSocket is blocked by proxy/carrier
+    let isCleanedUp = false;
+    const pollIntervalMs = role === 'tv' ? 650 : 800;
+    const pollTimer = setInterval(async () => {
+      if (isCleanedUp) return;
+      try {
+        const pingStart = Date.now();
+        const res = await fetch(`${apiBase}/api/room/${normalizedCode}`, { cache: 'no-store' });
+        if (res.ok) {
+          const data = await res.json();
+          if (data?.room) {
+            setConnected(true);
+            setLatencyMs(Date.now() - pingStart);
+            if (data.room.lastUpdated > lastKnownUpdatedRef.current) {
+              lastKnownUpdatedRef.current = data.room.lastUpdated;
+              setRoom(data.room);
+
+              // Sound trigger checking
+              if (data.room.soundTrigger && data.room.soundTrigger.nonce !== lastSoundNonceRef.current) {
+                lastSoundNonceRef.current = data.room.soundTrigger.nonce;
+                soundEffects.play(data.room.soundTrigger.sound);
+              }
+
+              // Propagate to BroadcastChannel
+              if (broadcastChannelRef.current) {
+                broadcastChannelRef.current.postMessage({
+                  type: 'ROOM_SYNC',
+                  room: data.room
+                });
+              }
+            }
+          }
+        }
+      } catch (err) {
+        // Blip recovery handled on next tick
+      }
+    }, pollIntervalMs);
+
+    // 4. WebSocket for sub-millisecond push when supported
     const wsUrl = getBackendWsUrl();
     let reconnectTimer: any = null;
-    let isCleanedUp = false;
 
     function connectWs() {
       if (isCleanedUp || !wsUrl) return;
@@ -148,34 +216,34 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
         ws.onopen = () => {
           setConnected(true);
           setLatencyMs(Date.now() - pingStart);
-          // Send Join
           ws.send(JSON.stringify({
             type: 'JOIN_ROOM',
             roomCode: normalizedCode,
             role,
             playerId,
-            playerName
+            playerName: playerName || 'Player'
           }));
         };
 
         ws.onmessage = (event) => {
           try {
             const data = JSON.parse(event.data);
-            if (data.room) {
-              setRoom(data.room);
+            if (data?.room) {
+              if (data.room.lastUpdated >= lastKnownUpdatedRef.current) {
+                lastKnownUpdatedRef.current = data.room.lastUpdated;
+                setRoom(data.room);
 
-              // Sound trigger checking
-              if (data.room.soundTrigger && data.room.soundTrigger.nonce !== lastSoundNonceRef.current) {
-                lastSoundNonceRef.current = data.room.soundTrigger.nonce;
-                soundEffects.play(data.room.soundTrigger.sound);
-              }
+                if (data.room.soundTrigger && data.room.soundTrigger.nonce !== lastSoundNonceRef.current) {
+                  lastSoundNonceRef.current = data.room.soundTrigger.nonce;
+                  soundEffects.play(data.room.soundTrigger.sound);
+                }
 
-              // Sync to BroadcastChannel
-              if (broadcastChannelRef.current) {
-                broadcastChannelRef.current.postMessage({
-                  type: 'ROOM_SYNC',
-                  room: data.room
-                });
+                if (broadcastChannelRef.current) {
+                  broadcastChannelRef.current.postMessage({
+                    type: 'ROOM_SYNC',
+                    room: data.room
+                  });
+                }
               }
             }
           } catch (err) {
@@ -184,19 +252,17 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
         };
 
         ws.onclose = () => {
-          setConnected(false);
           if (!isCleanedUp) {
-            reconnectTimer = setTimeout(connectWs, 3000);
+            reconnectTimer = setTimeout(connectWs, 4000);
           }
         };
 
         ws.onerror = () => {
-          ws.close();
+          try { ws.close(); } catch (e) {}
         };
       } catch (e) {
-        console.warn('WS Connection error:', e);
         if (!isCleanedUp) {
-          reconnectTimer = setTimeout(connectWs, 3000);
+          reconnectTimer = setTimeout(connectWs, 4000);
         }
       }
     }
@@ -205,6 +271,7 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
 
     return () => {
       isCleanedUp = true;
+      clearInterval(pollTimer);
       if (reconnectTimer) clearTimeout(reconnectTimer);
       if (socketRef.current) socketRef.current.close();
       if (broadcastChannelRef.current) broadcastChannelRef.current.close();
@@ -404,26 +471,52 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
     });
   }, [playerId, playerName]);
 
-  // Action dispatcher: sends to WebSocket server AND applies locally for zero-latency response
+  // Action dispatcher: sends to WebSocket server AND REST API AND applies locally for zero-latency response
   const sendAction = useCallback((type: string, payload?: any) => {
-    // 1. Immediately apply locally
+    // 1. Immediately apply locally for instant visual feedback
     applyLocalAction(type, payload);
 
-    // 2. Also send over WebSocket if connected
+    const actionData = {
+      type,
+      roomCode: normalizedCode,
+      role,
+      playerId,
+      playerName,
+      payload
+    };
+
+    // 2. Send over WebSocket if connected
     if (socketRef.current && socketRef.current.readyState === WebSocket.OPEN) {
       try {
-        socketRef.current.send(JSON.stringify({
-          type,
-          roomCode: normalizedCode,
-          role,
-          playerId,
-          playerName,
-          payload
-        }));
+        socketRef.current.send(JSON.stringify(actionData));
       } catch (e) {
         console.warn('Error sending WS action:', e);
       }
     }
+
+    // 3. ALWAYS dispatch via REST API: Guarantees phone actions reach the server even across proxies/mobile networks
+    const apiBase = getBackendHttpUrl();
+    fetch(`${apiBase}/api/room/${normalizedCode}/action`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(actionData)
+    })
+      .then((res) => res.json())
+      .then((data) => {
+        if (data?.room) {
+          lastKnownUpdatedRef.current = data.room.lastUpdated;
+          setRoom(data.room);
+          if (broadcastChannelRef.current) {
+            broadcastChannelRef.current.postMessage({
+              type: 'ROOM_SYNC',
+              room: data.room
+            });
+          }
+        }
+      })
+      .catch((err) => {
+        console.warn('REST action dispatch error:', err);
+      });
   }, [applyLocalAction, normalizedCode, role, playerId, playerName]);
 
   const buzzIn = useCallback(() => {
