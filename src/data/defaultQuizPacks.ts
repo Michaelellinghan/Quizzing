@@ -1,12 +1,7 @@
-import { Question } from '../types/quiz';
+import { Question, QuizPack } from '../types/quiz';
+import { CHASE_QUIZ_PACKS } from './chaseArchive';
 
-export interface QuizPack {
-  id: string;
-  title: string;
-  description: string;
-  category?: string;
-  questions: Question[];
-}
+export type { QuizPack };
 
 export const DEFAULT_QUIZ_PACKS: QuizPack[] = [
   {
@@ -516,39 +511,5 @@ export const DEFAULT_QUIZ_PACKS: QuizPack[] = [
       }
     ]
   },
-  {
-    id: 'pack-chase-armstrong',
-    title: 'Cash Builder: Alexander Armstrong',
-    description: 'Beat Alexander Armstrong! 1 point per right answer (+3 bonus if you beat his score, +1 if you tie).',
-    questions: [
-      { id: 'aa_1', type: 'TEXT', category: 'Cash Builder', question: 'What annual British show was founded by a dog biscuit salesman?', answer: 'Crufts', points: 1, explanation: "Alexander's answer: Panto (Incorrect)" },
-      { id: 'aa_2', type: 'TEXT', category: 'Cash Builder', question: 'Dairy Milk and More is a range of chocolate bars by what company?', answer: 'Cadbury', points: 1, explanation: "Alexander's answer: Cadbury (Correct)" },
-      { id: 'aa_3', type: 'TEXT', category: 'Cash Builder', question: 'What sport features in the Carol Ann Duffy poem "The Christmas Truce"?', answer: 'Football', points: 1, explanation: "Alexander's answer: Football (Correct)" },
-      { id: 'aa_4', type: 'TEXT', category: 'Cash Builder', question: 'The Strait of Otranto separates Albania from the heel of what country?', answer: 'Italy', points: 1, explanation: "Alexander's answer: Italy (Correct)" },
-      { id: 'aa_5', type: 'TEXT', category: 'Cash Builder', question: 'Actress Pat Kirkwood was the first female castaway on what radio show?', answer: 'Desert Island Discs', points: 1, explanation: "Alexander's answer: Desert Island (Correct)" },
-      { id: 'aa_6', type: 'TEXT', category: 'Cash Builder', question: 'What government agency is housed in a Cheltenham building known as The Doughnut?', answer: 'GCHQ', points: 1, explanation: "Alexander's answer: GCHQ (Correct)" },
-      { id: 'aa_7', type: 'TEXT', category: 'Cash Builder', question: '"The Last Devil to Die" is the fourth book in a series by which TV presenter?', answer: 'Richard Osman', points: 1, explanation: "Alexander's answer: Richard Osman (Correct)" },
-      { id: 'aa_8', type: 'TEXT', category: 'Cash Builder', question: 'What legumes did the Guardian call an obvious choice for a jacket potato filling?', answer: 'Baked beans / Beans', points: 1, explanation: "Alexander's answer: Kidney beans (Incorrect)" },
-      { id: 'aa_9', type: 'TEXT', category: 'Cash Builder', question: 'What is the name of the highest peak in both Cyprus and Greece?', answer: 'Mount Olympus / Olympus', points: 1, explanation: "Alexander's answer: Pass (Incorrect)" },
-      { id: 'aa_10', type: 'TEXT', category: 'Cash Builder', question: 'Which biblical figure was arrested in the Garden of Gethsemane?', answer: 'Jesus Christ / Jesus', points: 1, explanation: "Alexander's answer: Judas Iscariot (Incorrect) — Alexander scored 6/10 (£6,000)!" }
-    ]
-  },
-  {
-    id: 'pack-chase-carr',
-    title: 'Cash Builder: Jimmy Carr',
-    description: 'Beat Jimmy Carr! 1 point per right answer (+3 bonus if you beat his score, +1 if you tie).',
-    questions: [
-      { id: 'jc_1', type: 'TEXT', category: 'Cash Builder', question: '"Andale, andale!" and "Arriba, arriba!" are catchphrases of what cartoon mouse?', answer: 'Speedy Gonzales', points: 1, explanation: "Jimmy's answer: Speedy Gonzales (Correct)" },
-      { id: 'jc_2', type: 'TEXT', category: 'Cash Builder', question: 'What brand of biscuit has a name that means "to socialise"?', answer: 'Hobnob / Hobnobs', points: 1, explanation: "Jimmy's answer: Hobnob (Correct)" },
-      { id: 'jc_3', type: 'TEXT', category: 'Cash Builder', question: 'In April 2012, what US Film Festival visited London for the first time?', answer: 'Sundance', points: 1, explanation: "Jimmy's answer: Sundance (Correct)" },
-      { id: 'jc_4', type: 'TEXT', category: 'Cash Builder', question: 'Howard Florey and Ernst Chain isolated and purified what antibiotic?', answer: 'Penicillin', points: 1, explanation: "Jimmy's answer: Don't know (Incorrect)" },
-      { id: 'jc_5', type: 'TEXT', category: 'Cash Builder', question: 'In May 2012, who was appointed England football manager?', answer: 'Roy Hodgson', points: 1, explanation: "Jimmy's answer: Pass (Incorrect)" },
-      { id: 'jc_6', type: 'TEXT', category: 'Cash Builder', question: 'In the rhyme "Monday\'s Child", what day\'s child works hard for a living?', answer: "Saturday's Child / Saturday", points: 1, explanation: "Jimmy's answer: Wednesday (Incorrect)" },
-      { id: 'jc_7', type: 'TEXT', category: 'Cash Builder', question: 'Which Scottish Queen was executed at Fotheringhay in Northamptonshire?', answer: 'Mary, Queen of Scots / Mary Stuart', points: 1, explanation: "Jimmy's answer: Pass (Incorrect)" },
-      { id: 'jc_8', type: 'TEXT', category: 'Cash Builder', question: 'Who duetted with Aretha Franklin on the hit "I Knew You Were Waiting (For Me)"?', answer: 'George Michael', points: 1, explanation: "Jimmy's answer: George Michael (Correct)" },
-      { id: 'jc_9', type: 'TEXT', category: 'Cash Builder', question: 'What Japanese company gives its name to a set of British Radio Awards?', answer: 'Sony', points: 1, explanation: "Jimmy's answer: Sony (Correct)" },
-      { id: 'jc_10', type: 'TEXT', category: 'Cash Builder', question: 'What type of fuel container is so named because it was first used in Germany?', answer: 'Jerrycan', points: 1, explanation: "Jimmy's answer: Jerrycan (Correct)" },
-      { id: 'jc_11', type: 'TEXT', category: 'Cash Builder', question: 'Which politician famously said, "There is no such thing as society"?', answer: 'Margaret Thatcher / Thatcher', points: 1, explanation: "Jimmy scored 5/11 (£5,000)!" }
-    ]
-  }
+  ...CHASE_QUIZ_PACKS
 ];

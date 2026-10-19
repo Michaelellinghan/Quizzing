@@ -35,7 +35,7 @@ export const RoleSelectModal: React.FC<RoleSelectModalProps> = ({
         </div>
 
         <h1 className="text-3xl sm:text-5xl font-black text-white tracking-tight mb-3">
-          QuizCast <span className="bg-gradient-to-r from-amber-400 to-rose-400 bg-clip-text text-transparent">Live</span>
+          RAPID <span className="bg-gradient-to-r from-amber-400 to-rose-400 bg-clip-text text-transparent">⚡ TRIVIA</span>
         </h1>
 
         <p className="text-slate-300 text-sm sm:text-base max-w-2xl mx-auto leading-relaxed">

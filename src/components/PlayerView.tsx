@@ -361,7 +361,9 @@ export function PlayerView({
             <div className="text-center space-y-1 shrink-0">
               <div className="flex flex-wrap items-center justify-center gap-1.5">
                 <span className="text-[10px] font-extrabold uppercase tracking-widest px-2.5 py-0.5 rounded-full bg-purple-500/20 text-purple-300">
-                  Q{room.currentQIndex + 1}/{room.questions.length}
+                  {room.currentPackTitle?.startsWith('Cash Builder:')
+                    ? `Question ${room.currentQIndex + 1}`
+                    : `Q${room.currentQIndex + 1}/${room.questions.length}`}
                 </span>
 
                 {currentQ.type === 'CLUES' && (

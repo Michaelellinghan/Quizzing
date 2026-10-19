@@ -978,7 +978,36 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
       };
     } catch (e) {}
 
+    // 3. Firewall-Proof HTTPS JSON Polling Fallback (Port 443 GET requests for strict corporate/NHS Wi-Fi)
+    const ntfyPollInterval = setInterval(async () => {
+      if (isCleanedUp) return;
+      try {
+        const res = await fetch(`https://ntfy.sh/${httpTopic}/json?poll=1&since=10s`, {
+          cache: 'no-store'
+        });
+        if (res.ok) {
+          if (!isCleanedUp) {
+            setConnected(true);
+            setLatencyMs((prev) => (prev > 0 ? prev : Math.max(1, Date.now() - pingStart)));
+          }
+          const text = await res.text();
+          const lines = text.split('\n').filter(Boolean);
+          for (const line of lines) {
+            try {
+              const raw = JSON.parse(line);
+              if (raw.event === 'message' && raw.message) {
+                const parsed = typeof raw.message === 'string' ? JSON.parse(raw.message) : raw.message;
+                handleNetworkMessage(parsed);
+              }
+            } catch (e) {}
+          }
+        }
+      } catch (e) {}
+    }, 2500);
+
+    // 4. MQTT Cloud Mesh (Includes Port 443 WebSocket broker for strict firewalls)
     const mqttBrokers = [
+      'wss://mqtt.eclipseprojects.io:443/mqtt',
       'wss://broker.emqx.io:8084/mqtt',
       'wss://broker.hivemq.com:8884/mqtt',
       'wss://test.mosquitto.org:8081/mqtt'
@@ -1101,6 +1130,7 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
     return () => {
       isCleanedUp = true;
       clearInterval(heartbeatTimer);
+      clearInterval(ntfyPollInterval);
       clearTimeout(initTimer);
       clearTimeout(reconnectTimeout);
       if (mqttClientRef.current) {

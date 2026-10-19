@@ -164,10 +164,10 @@ export const TVView: React.FC<TVViewProps> = ({
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2">
             <span className="w-7 h-7 rounded-lg bg-gradient-to-tr from-amber-500 to-rose-500 flex items-center justify-center font-black text-white text-sm shadow-sm">
-              Q
+              ⚡
             </span>
             <span className="font-extrabold text-base tracking-tight text-white">
-              QuizCast <span className="text-amber-400 font-black">TV</span>
+              RAPID <span className="text-amber-400 font-black">⚡ TRIVIA</span>
             </span>
           </div>
 
@@ -280,7 +280,7 @@ export const TVView: React.FC<TVViewProps> = ({
                   </div>
 
                   <h1 className="text-3xl sm:text-4xl lg:text-5xl xl:text-6xl font-black tracking-tight text-white leading-tight">
-                    QuizCast <span className="bg-gradient-to-r from-amber-400 to-rose-400 bg-clip-text text-transparent">Live</span>
+                    RAPID <span className="bg-gradient-to-r from-amber-400 to-rose-400 bg-clip-text text-transparent">⚡ TRIVIA</span>
                   </h1>
 
                   <p className="text-sm sm:text-base lg:text-lg text-slate-300 font-medium mt-1 mb-5 line-clamp-2">
@@ -416,7 +416,9 @@ export const TVView: React.FC<TVViewProps> = ({
                     {currentQ.category || 'General Trivia'}
                   </span>
                   <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-slate-800 border border-slate-700 text-slate-300">
-                    Q{room.currentQIndex + 1} of {room.questions.length}
+                    {room.currentPackTitle.startsWith('Cash Builder:')
+                      ? `Question ${room.currentQIndex + 1}`
+                      : `Question ${room.currentQIndex + 1} of ${room.questions.length}`}
                   </span>
                   <span className="px-2.5 py-0.5 rounded-full text-xs font-bold bg-indigo-950 border border-indigo-700/60 text-indigo-300">
                     {currentQ.points} Pts

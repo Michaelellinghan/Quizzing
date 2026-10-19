@@ -210,15 +210,25 @@ export const HostView: React.FC<HostViewProps> = ({
             <ChevronLeft className="w-4 h-4" /> Prev
           </button>
 
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-2 flex-wrap justify-center">
             <div className="flex flex-col items-center">
               <span className="font-extrabold text-amber-400 text-sm">
-                Question {room.currentQIndex + 1} of {room.questions.length}
+                {room.currentPackTitle?.startsWith('Cash Builder:')
+                  ? `Question ${room.currentQIndex + 1}`
+                  : `Question ${room.currentQIndex + 1} of ${room.questions.length}`}
               </span>
               <span className="text-[11px] text-slate-400 truncate max-w-[150px]">
                 {room.currentPackTitle}
               </span>
             </div>
+
+            <button
+              onClick={() => setShowPackModal(true)}
+              className="py-1.5 px-2.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 border border-purple-400/40 text-purple-300 font-extrabold text-xs flex items-center gap-1 transition cursor-pointer shadow-sm"
+              title="Select quiz rounds or choose from 51 celebrity Cash Builder appearances"
+            >
+              <span>⚡ Celebrities (51)</span>
+            </button>
 
             <button
               onClick={() => (onOpenQuizStudio ? onOpenQuizStudio() : setShowAddQuestionModal(true))}
@@ -322,6 +332,20 @@ export const HostView: React.FC<HostViewProps> = ({
                     {sec}s
                   </button>
                 ))}
+
+                <button
+                  type="button"
+                  onClick={() => {
+                    onSetTimerDuration?.(60);
+                    onResetTimer?.(60);
+                    onStartTimer?.(60);
+                  }}
+                  className="px-2.5 py-1 rounded-lg bg-amber-500/20 border border-amber-400/40 text-amber-200 text-xs font-mono font-extrabold flex items-center gap-1 hover:bg-amber-500/30 transition cursor-pointer"
+                  title="Start 1-minute 60s Cash Builder Clock"
+                >
+                  <Clock className="w-3.5 h-3.5 text-amber-400" />
+                  <span>60s Cash Builder</span>
+                </button>
 
                 <button
                   type="button"
