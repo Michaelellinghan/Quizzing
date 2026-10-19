@@ -46,7 +46,7 @@ if (apiKey) {
 // ---------------- GAME STATE MANAGEMENT ----------------
 export interface Question {
   id: string;
-  type: 'BUZZER' | 'MCQ' | 'TEXT';
+  type: 'BUZZER' | 'MCQ' | 'TEXT' | 'NUMERIC' | 'BLUFF';
   category: string;
   question: string;
   options?: string[];

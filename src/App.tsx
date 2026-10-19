@@ -85,7 +85,19 @@ export default function App() {
     deleteQuestion,
     triggerSound,
     kickPlayer,
-    updatePlayerName
+    updatePlayerName,
+    startTimer,
+    pauseTimer,
+    resetTimer,
+    setTimerDuration,
+    toggleAutoLock,
+    triggerSabotage,
+    clearSabotage,
+    revealNextClue,
+    toggleBluffMode,
+    setBluffPhase,
+    submitBluff,
+    voteBluff
   } = useQuizSync({
     roomCode,
     role,
@@ -159,6 +171,10 @@ export default function App() {
             localStorage.setItem('quizcast_player_name', trimmed);
             updatePlayerName(trimmed);
           }}
+          onTriggerSabotage={triggerSabotage}
+          onClearSabotage={clearSabotage}
+          onSubmitBluff={submitBluff}
+          onVoteBluff={voteBluff}
         />
       </div>
     );
@@ -193,6 +209,14 @@ export default function App() {
           onOpenAIChat={() => setIsAIChatOpen(true)}
           onOpenQuizStudio={() => setIsQuizStudioOpen(true)}
           onSwitchRole={handleSwitchRole}
+          onStartTimer={startTimer}
+          onPauseTimer={pauseTimer}
+          onResetTimer={resetTimer}
+          onSetTimerDuration={setTimerDuration}
+          onToggleAutoLock={toggleAutoLock}
+          onRevealNextClue={revealNextClue}
+          onToggleBluffMode={toggleBluffMode}
+          onSetBluffPhase={setBluffPhase}
         />
       )}
 

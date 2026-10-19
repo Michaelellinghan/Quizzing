@@ -21,7 +21,13 @@ import {
   Volume2,
   UserX,
   Zap,
-  Eye
+  Eye,
+  Clock,
+  Play,
+  Pause,
+  Lightbulb,
+  Dices,
+  Skull
 } from 'lucide-react';
 import { QuestionPackManager } from './QuestionPackManager';
 import { AddQuestionModal } from './AddQuestionModal';
@@ -43,6 +49,14 @@ interface HostViewProps {
   onOpenAIChat: () => void;
   onOpenQuizStudio?: () => void;
   onSwitchRole?: () => void;
+  onStartTimer?: (durationSec?: number) => void;
+  onPauseTimer?: () => void;
+  onResetTimer?: (durationSec?: number) => void;
+  onSetTimerDuration?: (durationSec: number) => void;
+  onToggleAutoLock?: (autoLock?: boolean) => void;
+  onRevealNextClue?: () => void;
+  onToggleBluffMode?: (active?: boolean) => void;
+  onSetBluffPhase?: (phase: 'bluffing' | 'voting') => void;
 }
 
 export const HostView: React.FC<HostViewProps> = ({
@@ -61,7 +75,15 @@ export const HostView: React.FC<HostViewProps> = ({
   onKickPlayer,
   onOpenAIChat,
   onOpenQuizStudio,
-  onSwitchRole
+  onSwitchRole,
+  onStartTimer,
+  onPauseTimer,
+  onResetTimer,
+  onSetTimerDuration,
+  onToggleAutoLock,
+  onRevealNextClue,
+  onToggleBluffMode,
+  onSetBluffPhase
 }) => {
   const [showPackModal, setShowPackModal] = useState<boolean>(false);
   const [showAddQuestionModal, setShowAddQuestionModal] = useState<boolean>(false);
@@ -258,6 +280,103 @@ export const HostView: React.FC<HostViewProps> = ({
               </div>
             </div>
 
+            {/* 20s AUTO-TIMER & CLUES CONTROLLER */}
+            <div className="p-3.5 rounded-xl bg-slate-950/80 border border-slate-800 flex flex-col gap-2.5">
+              <div className="flex items-center justify-between">
+                <div className="flex items-center gap-2">
+                  <Clock className="w-4 h-4 text-amber-400" />
+                  <span className="text-xs font-black uppercase text-white">Auto-Timer Controller</span>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span
+                    className={`px-2.5 py-0.5 rounded-full text-xs font-mono font-black ${
+                      (room.timer?.remainingSec ?? 20) <= 5
+                        ? 'bg-rose-500/20 text-rose-400 border border-rose-500/40 animate-pulse'
+                        : 'bg-indigo-950 text-indigo-300 border border-indigo-700/50'
+                    }`}
+                  >
+                    {room.timer?.remainingSec ?? 20}s {room.timer?.running ? '▶ Running' : '⏸ Paused'}
+                  </span>
+                </div>
+              </div>
+
+              {/* Timer Duration Presets & Controls */}
+              <div className="flex items-center gap-2 flex-wrap">
+                {[15, 20, 30].map((sec) => (
+                  <button
+                    key={sec}
+                    type="button"
+                    onClick={() => {
+                      onSetTimerDuration?.(sec);
+                      onResetTimer?.(sec);
+                    }}
+                    className={`px-2.5 py-1 rounded-lg text-xs font-bold font-mono transition ${
+                      room.timer?.durationSec === sec
+                        ? 'bg-amber-500 text-slate-950'
+                        : 'bg-slate-800 text-slate-300 hover:bg-slate-700'
+                    }`}
+                  >
+                    {sec}s
+                  </button>
+                ))}
+
+                <button
+                  type="button"
+                  onClick={() => (room.timer?.running ? onPauseTimer?.() : onStartTimer?.())}
+                  className="py-1 px-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-xs flex items-center gap-1 transition"
+                >
+                  {room.timer?.running ? (
+                    <>
+                      <Pause className="w-3.5 h-3.5" /> Pause
+                    </>
+                  ) : (
+                    <>
+                      <Play className="w-3.5 h-3.5" /> Start
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onResetTimer?.()}
+                  className="py-1 px-2.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-bold transition"
+                >
+                  Reset
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => onToggleAutoLock?.()}
+                  className={`ml-auto px-2 py-1 rounded-lg text-[11px] font-bold transition flex items-center gap-1 ${
+                    room.timer?.autoLock
+                      ? 'bg-emerald-950 text-emerald-300 border border-emerald-800'
+                      : 'bg-slate-800 text-slate-400 border border-slate-700'
+                  }`}
+                  title="Automatically lock answers when timer hits 0s"
+                >
+                  <span>Auto-Lock at 0s:</span>
+                  <span className="font-mono">{room.timer?.autoLock ? 'ON' : 'OFF'}</span>
+                </button>
+              </div>
+
+              {/* Progressive Clue Ladder */}
+              {(currentQ.progressiveClues || currentQ.hint) && (
+                <div className="pt-2 border-t border-slate-800 flex items-center justify-between">
+                  <div className="text-xs text-amber-300 font-semibold flex items-center gap-1">
+                    <Lightbulb className="w-3.5 h-3.5" />
+                    <span>Progressive Clues ({room.progressiveClueIndex ?? 0} revealed)</span>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => onRevealNextClue?.()}
+                    className="py-1 px-2.5 rounded-lg bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/40 text-amber-300 font-bold text-xs transition"
+                  >
+                    Reveal Next Clue
+                  </button>
+                </div>
+              )}
+            </div>
+
             {/* Buzzer Lock & Reset Controls */}
             <div className="grid grid-cols-2 gap-3 pt-2">
               <button
@@ -342,6 +461,21 @@ export const HostView: React.FC<HostViewProps> = ({
                         {buzz && (
                           <span className="text-[11px] text-slate-400 font-mono">({buzz.elapsedMs}ms)</span>
                         )}
+                        {(submission?.doubleDown || buzz?.doubleDown) && (
+                          <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 flex items-center gap-1 shadow-sm">
+                            <Zap className="w-2.5 h-2.5 fill-slate-950" /> 2X WAGER
+                          </span>
+                        )}
+                        {submission?.pointHeist && (
+                          <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-rose-500 text-white flex items-center gap-1 shadow-sm">
+                            🚨 HEIST
+                          </span>
+                        )}
+                        {submission?.speedBonusAwarded ? (
+                          <span className="text-[10px] font-black uppercase tracking-wider px-2 py-0.5 rounded-full bg-yellow-400 text-slate-950 flex items-center gap-1">
+                            ⚡ +{submission.speedBonusAwarded} SPEED
+                          </span>
+                        ) : null}
                       </div>
 
                       {submission && (

@@ -1,4 +1,4 @@
-import { ChatMessage, Question } from '../types/quiz';
+import { ChatMessage, Question, QuestionType } from '../types/quiz';
 
 export interface ChatRequestOptions {
   messages: { role: 'user' | 'model'; text: string }[];
@@ -86,7 +86,7 @@ export async function generateAiRound(
 
 export async function generateSingleQuestionWithAI(
   topic: string,
-  type: 'BUZZER' | 'MCQ' | 'TEXT' = 'MCQ',
+  type: QuestionType = 'MCQ',
   difficulty: string = 'medium'
 ): Promise<Question> {
   try {

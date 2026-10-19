@@ -36,7 +36,17 @@ function createDefaultRoom(code: string): GameRoom {
     submissions: {},
     questionHistory: {},
     lastUpdated: Date.now(),
-    revision: 1
+    revision: 1,
+    timer: {
+      durationSec: 20,
+      remainingSec: 20,
+      running: false,
+      autoLock: true,
+      endsAt: 0
+    },
+    progressiveClueIndex: 0,
+    activeSabotages: {},
+    superlatives: []
   };
 }
 
@@ -83,14 +93,21 @@ export function reduceGameAction(
             streak: 0,
             connected: true,
             avatar: `avatar-${(Object.keys(updated.players).length % 8) + 1}`,
-            lastSeen: now
+            lastSeen: now,
+            doubleDownTokens: 2,
+            sabotageTokens: 1,
+            pointHeistAvailable: true,
+            activeSabotage: null
           };
         } else {
           updated.players[playerId] = {
             ...updated.players[playerId],
             connected: true,
             lastSeen: now,
-            name: cleanName && cleanName !== 'Player' ? cleanName : updated.players[playerId].name
+            name: cleanName && cleanName !== 'Player' ? cleanName : updated.players[playerId].name,
+            doubleDownTokens: updated.players[playerId].doubleDownTokens ?? 2,
+            sabotageTokens: updated.players[playerId].sabotageTokens ?? 1,
+            pointHeistAvailable: updated.players[playerId].pointHeistAvailable ?? true
           };
         }
       }
@@ -106,12 +123,154 @@ export function reduceGameAction(
           updated.inputOpen = payload?.inputOpen ?? true;
           updated.buzzes = [];
           updated.submissions = {};
+          updated.progressiveClueIndex = 0;
+          updated.lastHeistEvent = null;
+          // Auto-start 20s timer on Question phase
+          const dur = updated.timer?.durationSec || 20;
+          updated.timer = {
+            durationSec: dur,
+            remainingSec: dur,
+            running: true,
+            autoLock: updated.timer?.autoLock ?? true,
+            endsAt: now + dur * 1000
+          };
           updated.soundTrigger = { sound: 'whoosh', nonce: Math.random() };
         } else if (newPhase === 'REVEAL') {
           updated.inputOpen = false;
+          if (updated.timer) {
+            updated.timer = { ...updated.timer, running: false };
+          }
+
+          // 1. FASTEST FINGER SPEED BONUSES:
+          // Find all correct submissions for this question sorted by speed
+          const correctSubs = Object.values(updated.submissions).filter((s) => s.status === 'correct');
+          correctSubs.sort((a, b) => a.elapsedMs - b.elapsedMs);
+          const bonuses = [5, 3, 1];
+          correctSubs.forEach((sub, rank) => {
+            if (rank < bonuses.length && !sub.speedBonusAwarded) {
+              const bonusPts = bonuses[rank];
+              sub.speedBonusAwarded = bonusPts;
+              if (updated.players[sub.playerId]) {
+                updated.players[sub.playerId].score += bonusPts;
+              }
+            }
+          });
+
+          // 2. POINT HEIST:
+          // Check if any player activated Point Heist and answered correctly
+          const heistSub = Object.values(updated.submissions).find((s) => s.pointHeist && s.status === 'correct');
+          if (heistSub && updated.players[heistSub.playerId]) {
+            const others = Object.values(updated.players)
+              .filter((p) => p.id !== heistSub.playerId)
+              .sort((a, b) => b.score - a.score);
+            const leader = others[0];
+            if (leader && leader.score > 0) {
+              const stolen = Math.min(10, leader.score);
+              leader.score -= stolen;
+              updated.players[heistSub.playerId].score += stolen;
+              updated.lastHeistEvent = {
+                fromName: leader.name,
+                toName: heistSub.playerName,
+                points: stolen,
+                timestamp: now
+              };
+            }
+          }
+
           updated.soundTrigger = { sound: 'ding', nonce: Math.random() };
-        } else if (newPhase === 'ROUND_STATS' || newPhase === 'LEADERBOARD') {
+        } else if (newPhase === 'ROUND_STATS') {
           updated.inputOpen = false;
+          if (updated.timer) {
+            updated.timer = { ...updated.timer, running: false };
+          }
+          updated.soundTrigger = { sound: 'fanfare', nonce: Math.random() };
+        } else if (newPhase === 'LEADERBOARD') {
+          updated.inputOpen = false;
+          if (updated.timer) {
+            updated.timer = { ...updated.timer, running: false };
+          }
+
+          // Compute End-of-Night Superlatives!
+          const playersArr = Object.values(updated.players);
+          if (playersArr.length > 0) {
+            const superlatives: { award: string; icon: string; recipientName: string; detail: string }[] = [];
+            const sortedByScore = [...playersArr].sort((a, b) => b.score - a.score);
+            superlatives.push({
+              award: 'Grand Champion',
+              icon: '👑',
+              recipientName: sortedByScore[0].name,
+              detail: `${sortedByScore[0].score} total points scored`
+            });
+
+            // Speed Demon
+            let fastestBuzzTime = Infinity;
+            let fastestBuzzPlayer = '';
+            updated.buzzes.forEach((b) => {
+              if (b.elapsedMs < fastestBuzzTime) {
+                fastestBuzzTime = b.elapsedMs;
+                fastestBuzzPlayer = b.playerName;
+              }
+            });
+            if (fastestBuzzPlayer && fastestBuzzTime < 15000) {
+              superlatives.push({
+                award: 'Speed Demon',
+                icon: '⚡',
+                recipientName: fastestBuzzPlayer,
+                detail: `Fastest buzz in ${Math.round(fastestBuzzTime)}ms`
+              });
+            }
+
+            // Streak Master
+            const bestStreak = [...playersArr].sort((a, b) => (b.streak || 0) - (a.streak || 0))[0];
+            if (bestStreak && bestStreak.streak > 0) {
+              superlatives.push({
+                award: 'Streak Master',
+                icon: '🔥',
+                recipientName: bestStreak.name,
+                detail: `${bestStreak.streak} question win streak`
+              });
+            }
+
+            // Sharpshooter
+            const correctCounts: Record<string, number> = {};
+            Object.values(updated.submissions).forEach((s) => {
+              if (s.status === 'correct') {
+                correctCounts[s.playerName] = (correctCounts[s.playerName] || 0) + 1;
+              }
+            });
+            const sharpshooter = Object.entries(correctCounts).sort((a, b) => b[1] - a[1])[0];
+            if (sharpshooter && sharpshooter[1] > 0) {
+              superlatives.push({
+                award: 'Sharpshooter',
+                icon: '🎯',
+                recipientName: sharpshooter[0],
+                detail: `${sharpshooter[1]} verified correct answers`
+              });
+            }
+
+            // High Roller
+            const doubleDownWins = Object.values(updated.submissions).filter((s) => s.doubleDown && s.status === 'correct');
+            if (doubleDownWins.length > 0) {
+              superlatives.push({
+                award: 'High Roller',
+                icon: '🎲',
+                recipientName: doubleDownWins[0].playerName,
+                detail: `Bold 2x Double-Down victory`
+              });
+            }
+
+            if (sortedByScore.length >= 2) {
+              superlatives.push({
+                award: 'Crowd Favorite',
+                icon: '🌟',
+                recipientName: sortedByScore[sortedByScore.length - 1].name,
+                detail: `Maximum energy and pub quiz heart!`
+              });
+            }
+
+            updated.superlatives = superlatives;
+          }
+
           updated.soundTrigger = { sound: 'fanfare', nonce: Math.random() };
         }
       }
@@ -127,6 +286,16 @@ export function reduceGameAction(
         updated.inputOpen = true;
         updated.questionStartTime = now;
         updated.phase = 'QUESTION';
+        updated.progressiveClueIndex = 0;
+        updated.lastHeistEvent = null;
+        const dur = updated.timer?.durationSec || 20;
+        updated.timer = {
+          durationSec: dur,
+          remainingSec: dur,
+          running: true,
+          autoLock: updated.timer?.autoLock ?? true,
+          endsAt: now + dur * 1000
+        };
         updated.soundTrigger = { sound: 'whoosh', nonce: Math.random() };
       }
       break;
@@ -155,12 +324,18 @@ export function reduceGameAction(
       if (!playerId || !updated.inputOpen || updated.phase !== 'QUESTION') break;
       if (!updated.buzzes.some((b) => b.playerId === playerId)) {
         const elapsed = updated.questionStartTime > 0 ? now - updated.questionStartTime : 0;
+        const isDoubleDown = Boolean(payload?.doubleDown);
+        if (isDoubleDown && updated.players[playerId] && (updated.players[playerId].doubleDownTokens ?? 2) > 0) {
+          updated.players[playerId].doubleDownTokens = Math.max(0, (updated.players[playerId].doubleDownTokens ?? 2) - 1);
+        }
+
         const newBuzz: Buzz = {
           playerId,
           playerName: updated.players[playerId]?.name || playerName || 'Player',
           timestamp: now,
           elapsedMs: Math.max(1, elapsed),
-          serverOrder: updated.buzzes.length + 1
+          serverOrder: updated.buzzes.length + 1,
+          doubleDown: isDoubleDown
         };
         updated.buzzes.push(newBuzz);
 
@@ -194,6 +369,15 @@ export function reduceGameAction(
       let autoStatus: 'pending' | 'correct' | 'wrong' = 'pending';
       if (currentQ?.type === 'MCQ' && acceptableAnswers.length > 0) {
         autoStatus = acceptableAnswers.includes(cleanSubmitted) ? 'correct' : 'wrong';
+      } else if (currentQ?.type === 'NUMERIC') {
+        const numSubmitted = parseFloat(cleanSubmitted.replace(/[^0-9.-]/g, ''));
+        const numOfficial = parseFloat(rawOfficial.replace(/[^0-9.-]/g, ''));
+        if (!isNaN(numSubmitted) && !isNaN(numOfficial)) {
+          const diff = Math.abs(numSubmitted - numOfficial);
+          autoStatus = diff === 0 || (numOfficial !== 0 && diff / Math.abs(numOfficial) <= 0.05) ? 'correct' : 'wrong';
+        } else {
+          autoStatus = acceptableAnswers.includes(cleanSubmitted) ? 'correct' : 'wrong';
+        }
       } else if (acceptableAnswers.length > 0) {
         if (acceptableAnswers.includes(cleanSubmitted)) {
           autoStatus = 'correct';
@@ -210,7 +394,22 @@ export function reduceGameAction(
         );
       }
 
-      const pointsAwarded = autoStatus === 'correct' ? currentQ?.points || 10 : 0;
+      const isDoubleDown = Boolean(payload?.doubleDown || prevSub?.doubleDown);
+      const isPointHeist = Boolean(payload?.pointHeist || prevSub?.pointHeist);
+
+      if (isDoubleDown && updated.players[playerId] && (updated.players[playerId].doubleDownTokens ?? 2) > 0 && !prevSub?.doubleDown) {
+        updated.players[playerId].doubleDownTokens = Math.max(0, (updated.players[playerId].doubleDownTokens ?? 2) - 1);
+      }
+      if (isPointHeist && updated.players[playerId] && !prevSub?.pointHeist) {
+        updated.players[playerId].pointHeistAvailable = false;
+      }
+
+      let basePoints = currentQ?.points || 10;
+      if (isDoubleDown) {
+        basePoints *= 2;
+      }
+
+      const pointsAwarded = autoStatus === 'correct' ? basePoints : 0;
       const subObj: Submission = {
         playerId,
         playerName: updated.players[playerId]?.name || playerName || 'Player',
@@ -218,7 +417,9 @@ export function reduceGameAction(
         timestamp: now,
         elapsedMs: Math.max(1, elapsed),
         status: autoStatus,
-        pointsAwarded
+        pointsAwarded,
+        doubleDown: isDoubleDown,
+        pointHeist: isPointHeist
       };
       updated.submissions[playerId] = subObj;
 
@@ -228,7 +429,8 @@ export function reduceGameAction(
           playerName: updated.players[playerId]?.name || playerName || 'Player',
           timestamp: now,
           elapsedMs: Math.max(1, elapsed),
-          serverOrder: updated.buzzes.length + 1
+          serverOrder: updated.buzzes.length + 1,
+          doubleDown: isDoubleDown
         });
       }
 
@@ -371,6 +573,167 @@ export function reduceGameAction(
         delete updated.players[kickId];
         updated.buzzes = updated.buzzes.filter((b) => b.playerId !== kickId);
         delete updated.submissions[kickId];
+      }
+      break;
+    }
+
+    case 'START_TIMER': {
+      const dur = Number(payload?.durationSec) || updated.timer?.durationSec || 20;
+      updated.timer = {
+        durationSec: dur,
+        remainingSec: dur,
+        running: true,
+        autoLock: payload?.autoLock ?? (updated.timer?.autoLock ?? true),
+        endsAt: now + dur * 1000
+      };
+      updated.soundTrigger = { sound: 'unlock', nonce: Math.random() };
+      break;
+    }
+
+    case 'PAUSE_TIMER': {
+      if (updated.timer) {
+        updated.timer = { ...updated.timer, running: false };
+      }
+      break;
+    }
+
+    case 'RESET_TIMER': {
+      const dur = Number(payload?.durationSec) || updated.timer?.durationSec || 20;
+      updated.timer = {
+        durationSec: dur,
+        remainingSec: dur,
+        running: false,
+        autoLock: updated.timer?.autoLock ?? true,
+        endsAt: 0
+      };
+      break;
+    }
+
+    case 'SET_TIMER_DURATION': {
+      const dur = Math.max(5, Number(payload?.durationSec) || 20);
+      if (updated.timer) {
+        updated.timer = {
+          ...updated.timer,
+          durationSec: dur,
+          remainingSec: dur
+        };
+      }
+      break;
+    }
+
+    case 'TOGGLE_AUTO_LOCK': {
+      if (updated.timer) {
+        updated.timer = {
+          ...updated.timer,
+          autoLock: payload?.autoLock ?? !updated.timer.autoLock
+        };
+      }
+      break;
+    }
+
+    case 'TIMER_TICK': {
+      if (updated.timer && updated.timer.running && updated.phase === 'QUESTION') {
+        const newRem = Math.max(0, updated.timer.remainingSec - 1);
+        updated.timer = {
+          ...updated.timer,
+          remainingSec: newRem
+        };
+        if (newRem <= 0) {
+          updated.timer.running = false;
+          if (updated.timer.autoLock) {
+            updated.inputOpen = false;
+            updated.soundTrigger = { sound: 'buzzer', nonce: Math.random() };
+          }
+        } else if (newRem <= 5) {
+          updated.soundTrigger = { sound: 'tick', nonce: Math.random() };
+        }
+      }
+      break;
+    }
+
+    case 'TRIGGER_SABOTAGE': {
+      const targetPid = payload?.targetPlayerId;
+      const sabType = (payload?.type || 'ink') as 'ink' | 'frost' | 'scramble';
+      const attacker = updated.players[playerId || ''];
+      if (targetPid && updated.players[targetPid] && attacker && (attacker.sabotageTokens ?? 1) > 0) {
+        attacker.sabotageTokens = Math.max(0, (attacker.sabotageTokens ?? 1) - 1);
+        const sabObj = {
+          type: sabType,
+          fromName: attacker.name,
+          expiresAt: now + 6000
+        };
+        updated.players[targetPid].activeSabotage = sabObj;
+        if (!updated.activeSabotages) updated.activeSabotages = {};
+        updated.activeSabotages[targetPid] = sabObj;
+        updated.soundTrigger = { sound: 'whoosh', nonce: Math.random() };
+      }
+      break;
+    }
+
+    case 'CLEAR_SABOTAGE': {
+      const targetPid = payload?.targetPlayerId || playerId;
+      if (targetPid && updated.players[targetPid]) {
+        updated.players[targetPid].activeSabotage = null;
+        if (updated.activeSabotages) {
+          delete updated.activeSabotages[targetPid];
+        }
+      }
+      break;
+    }
+
+    case 'REVEAL_NEXT_CLUE': {
+      const currentQ = updated.questions[updated.currentQIndex];
+      const clues = currentQ?.progressiveClues || (currentQ?.hint ? [currentQ.hint] : []);
+      const nextIdx = (updated.progressiveClueIndex ?? 0) + 1;
+      if (nextIdx <= clues.length) {
+        updated.progressiveClueIndex = nextIdx;
+        updated.soundTrigger = { sound: 'ding', nonce: Math.random() };
+      }
+      break;
+    }
+
+    case 'TOGGLE_BLUFF_MODE': {
+      const active = payload?.active ?? !(updated.bluffMode?.active);
+      updated.bluffMode = {
+        active,
+        phase: 'bluffing',
+        bluffs: {}
+      };
+      updated.soundTrigger = { sound: 'whoosh', nonce: Math.random() };
+      break;
+    }
+
+    case 'SET_BLUFF_PHASE': {
+      const phase = (payload?.phase || 'voting') as 'bluffing' | 'voting';
+      if (updated.bluffMode) {
+        updated.bluffMode.phase = phase;
+      }
+      break;
+    }
+
+    case 'SUBMIT_BLUFF': {
+      const text = String(payload?.text || '').trim();
+      if (playerId && text && updated.bluffMode) {
+        updated.bluffMode.bluffs[playerId] = {
+          playerId,
+          playerName: updated.players[playerId]?.name || playerName || 'Player',
+          text,
+          votes: []
+        };
+      }
+      break;
+    }
+
+    case 'VOTE_BLUFF': {
+      const votedTargetId = payload?.targetPlayerId;
+      if (playerId && votedTargetId && updated.bluffMode) {
+        const entry = updated.bluffMode.bluffs[votedTargetId];
+        if (entry && !entry.votes.includes(playerId)) {
+          entry.votes.push(playerId);
+          if (updated.players[votedTargetId]) {
+            updated.players[votedTargetId].score += 5;
+          }
+        }
       }
       break;
     }
@@ -879,13 +1242,28 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
     [normalizedCode, role, playerId, playerName, applyRoomState, publishToNetwork]
   );
 
-  const buzzIn = useCallback(() => {
-    sendAction('BUZZ_IN');
-  }, [sendAction]);
+  // Authoritative 1s Timer Ticker for TV or Host
+  useEffect(() => {
+    if (role !== 'tv' && role !== 'host') return;
+    if (!room.timer?.running || room.phase !== 'QUESTION') return;
+
+    const interval = setInterval(() => {
+      sendAction('TIMER_TICK');
+    }, 1000);
+
+    return () => clearInterval(interval);
+  }, [role, room.timer?.running, room.phase, sendAction]);
+
+  const buzzIn = useCallback(
+    (options?: { doubleDown?: boolean }) => {
+      sendAction('BUZZ_IN', options);
+    },
+    [sendAction]
+  );
 
   const submitAnswer = useCallback(
-    (answer: string) => {
-      sendAction('SUBMIT_ANSWER', { answer });
+    (answer: string, options?: { doubleDown?: boolean; pointHeist?: boolean }) => {
+      sendAction('SUBMIT_ANSWER', { answer, ...options });
     },
     [sendAction]
   );
@@ -978,6 +1356,84 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
     [sendAction]
   );
 
+  const startTimer = useCallback(
+    (durationSec?: number) => {
+      sendAction('START_TIMER', { durationSec });
+    },
+    [sendAction]
+  );
+
+  const pauseTimer = useCallback(() => {
+    sendAction('PAUSE_TIMER');
+  }, [sendAction]);
+
+  const resetTimer = useCallback(
+    (durationSec?: number) => {
+      sendAction('RESET_TIMER', { durationSec });
+    },
+    [sendAction]
+  );
+
+  const setTimerDuration = useCallback(
+    (durationSec: number) => {
+      sendAction('SET_TIMER_DURATION', { durationSec });
+    },
+    [sendAction]
+  );
+
+  const toggleAutoLock = useCallback(
+    (autoLock?: boolean) => {
+      sendAction('TOGGLE_AUTO_LOCK', { autoLock });
+    },
+    [sendAction]
+  );
+
+  const triggerSabotage = useCallback(
+    (targetPlayerId: string, type: 'ink' | 'frost' | 'scramble') => {
+      sendAction('TRIGGER_SABOTAGE', { targetPlayerId, type });
+    },
+    [sendAction]
+  );
+
+  const clearSabotage = useCallback(
+    (targetPlayerId?: string) => {
+      sendAction('CLEAR_SABOTAGE', { targetPlayerId });
+    },
+    [sendAction]
+  );
+
+  const revealNextClue = useCallback(() => {
+    sendAction('REVEAL_NEXT_CLUE');
+  }, [sendAction]);
+
+  const toggleBluffMode = useCallback(
+    (active?: boolean) => {
+      sendAction('TOGGLE_BLUFF_MODE', { active });
+    },
+    [sendAction]
+  );
+
+  const setBluffPhase = useCallback(
+    (phase: 'bluffing' | 'voting') => {
+      sendAction('SET_BLUFF_PHASE', { phase });
+    },
+    [sendAction]
+  );
+
+  const submitBluff = useCallback(
+    (text: string) => {
+      sendAction('SUBMIT_BLUFF', { text });
+    },
+    [sendAction]
+  );
+
+  const voteBluff = useCallback(
+    (targetPlayerId: string) => {
+      sendAction('VOTE_BLUFF', { targetPlayerId });
+    },
+    [sendAction]
+  );
+
   return {
     room,
     connected,
@@ -996,6 +1452,18 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
     deleteQuestion,
     triggerSound,
     kickPlayer,
-    updatePlayerName
+    updatePlayerName,
+    startTimer,
+    pauseTimer,
+    resetTimer,
+    setTimerDuration,
+    toggleAutoLock,
+    triggerSabotage,
+    clearSabotage,
+    revealNextClue,
+    toggleBluffMode,
+    setBluffPhase,
+    submitBluff,
+    voteBluff
   };
 }

@@ -24,7 +24,9 @@ import {
   Smartphone,
   Copy,
   Check,
-  ExternalLink
+  ExternalLink,
+  Target,
+  AlertTriangle
 } from 'lucide-react';
 import confetti from 'canvas-confetti';
 
@@ -408,7 +410,7 @@ export const TVView: React.FC<TVViewProps> = ({
             <div className="flex-1 min-h-0 flex flex-col justify-between">
               
               {/* Question Header Meta Strip */}
-              <div className="flex items-center justify-between gap-3 mb-3 shrink-0">
+              <div className="flex items-center justify-between gap-3 mb-2 shrink-0">
                 <div className="flex items-center gap-2">
                   <span className="px-3 py-1 rounded-full text-xs font-extrabold uppercase tracking-wider bg-amber-500/10 border border-amber-500/30 text-amber-400">
                     {currentQ.category || 'General Trivia'}
@@ -425,21 +427,68 @@ export const TVView: React.FC<TVViewProps> = ({
                   <span className="text-xs font-semibold px-2 py-0.5 rounded-lg bg-slate-800 text-slate-400 border border-slate-700 uppercase">
                     {currentQ.type}
                   </span>
-                  <span className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-full ${
-                    room.inputOpen
-                      ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 animate-pulse'
-                      : 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
-                  }`}>
+                  <span
+                    className={`inline-flex items-center gap-1 text-xs font-bold px-2.5 py-0.5 rounded-full ${
+                      room.inputOpen
+                        ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/40 animate-pulse'
+                        : 'bg-rose-500/20 text-rose-400 border border-rose-500/40'
+                    }`}
+                  >
                     <Clock className="w-3 h-3" />
                     {room.inputOpen ? 'BUZZERS OPEN' : 'LOCKED'}
                   </span>
                 </div>
               </div>
 
+              {/* Broadcast 20s Countdown Timer Bar */}
+              {room.timer && (
+                <div className="w-full mb-3 shrink-0">
+                  <div className="flex items-center justify-between text-xs font-mono font-black mb-1">
+                    <span className="flex items-center gap-1.5 text-amber-400 uppercase tracking-widest text-[10px]">
+                      <Clock className="w-3.5 h-3.5" /> Countdown Clock
+                    </span>
+                    <span
+                      className={`px-2 py-0.5 rounded-full text-xs font-black ${
+                        room.timer.remainingSec <= 5
+                          ? 'bg-rose-600 text-white animate-pulse'
+                          : 'bg-slate-800 text-amber-300'
+                      }`}
+                    >
+                      {room.timer.remainingSec}s / {room.timer.durationSec}s
+                    </span>
+                  </div>
+                  <div className="w-full h-2 bg-slate-950 rounded-full overflow-hidden border border-slate-800">
+                    <div
+                      className={`h-full transition-all duration-1000 ease-linear rounded-full ${
+                        room.timer.remainingSec <= 5
+                          ? 'bg-gradient-to-r from-rose-600 to-red-500 animate-pulse shadow-[0_0_12px_rgba(239,68,68,0.8)]'
+                          : 'bg-gradient-to-r from-amber-500 to-yellow-400'
+                      }`}
+                      style={{
+                        width: `${Math.max(
+                          0,
+                          Math.min(100, (room.timer.remainingSec / (room.timer.durationSec || 20)) * 100)
+                        )}%`
+                      }}
+                    />
+                  </div>
+                </div>
+              )}
+
+              {/* Point Heist Event Notification */}
+              {room.lastHeistEvent && Date.now() - room.lastHeistEvent.timestamp < 9000 && (
+                <div className="mb-2 px-4 py-2 rounded-xl bg-gradient-to-r from-rose-600 to-red-600 text-white font-black text-xs flex items-center justify-center gap-2 shadow-lg animate-bounce shrink-0">
+                  <Target className="w-4 h-4 text-white" />
+                  <span>
+                    🚨 POINT HEIST! {room.lastHeistEvent.toName} stole {room.lastHeistEvent.points} pts from{' '}
+                    {room.lastHeistEvent.fromName}!
+                  </span>
+                </div>
+              )}
+
               {/* Center Content Stage */}
               <div className="flex-1 min-h-0 flex flex-col justify-center items-center text-center my-auto py-1">
-                
-                {/* Media Image Clue: Scaled to max 32vh so it NEVER overflows 16:9 */}
+                {/* Media Image Clue: Scaled to max 30vh */}
                 {currentQ.mediaType === 'image' && currentQ.mediaUrl && (
                   <div className="mb-3 max-h-[30vh] max-w-lg rounded-2xl overflow-hidden border border-slate-700 shadow-xl bg-black shrink-0">
                     <img
@@ -453,6 +502,13 @@ export const TVView: React.FC<TVViewProps> = ({
                   </div>
                 )}
 
+                {/* Progressive Clue Banner */}
+                {room.progressiveClueIndex && room.progressiveClueIndex > 0 && currentQ.progressiveClues && (
+                  <div className="mb-2.5 px-4 py-1.5 rounded-xl bg-amber-500/15 border border-amber-400/40 text-amber-200 text-xs sm:text-sm font-bold max-w-xl animate-fade-in shrink-0">
+                    💡 Clue {room.progressiveClueIndex}: {currentQ.progressiveClues[room.progressiveClueIndex - 1]}
+                  </div>
+                )}
+
                 {/* Question Prompt */}
                 <h2 className="text-xl sm:text-2xl md:text-3xl lg:text-4xl font-black text-white leading-tight max-w-4xl tracking-tight mb-3">
                   {currentQ.question}
@@ -461,12 +517,15 @@ export const TVView: React.FC<TVViewProps> = ({
                 {/* Buzzer Spotlight on TV when a player buzzes */}
                 {activeBuzz && room.phase === 'QUESTION' && (
                   <div className="w-full max-w-xl my-2 p-3.5 rounded-2xl bg-amber-500/20 border-2 border-amber-400 tv-buzzer-spotlight shrink-0">
-                    <div className="text-[11px] uppercase tracking-widest font-black text-amber-300">
-                      🚨 FIRST TO BUZZ IN
+                    <div className="text-[11px] uppercase tracking-widest font-black text-amber-300 flex items-center justify-center gap-1.5">
+                      <span>🚨 FIRST TO BUZZ IN</span>
+                      {activeBuzz.doubleDown && (
+                        <span className="px-2 py-0.5 rounded-full bg-amber-400 text-slate-950 font-black text-[10px]">
+                          2X WAGER
+                        </span>
+                      )}
                     </div>
-                    <div className="text-2xl sm:text-3xl font-black text-white">
-                      {activeBuzz.playerName}
-                    </div>
+                    <div className="text-2xl sm:text-3xl font-black text-white">{activeBuzz.playerName}</div>
                     <div className="text-xs font-mono text-amber-200">
                       {activeBuzz.elapsedMs} ms • #{activeBuzz.serverOrder} in line
                     </div>
@@ -510,12 +569,28 @@ export const TVView: React.FC<TVViewProps> = ({
                 {/* Reveal Answer Banner */}
                 {room.phase === 'REVEAL' && (
                   <div className="w-full max-w-2xl mt-3 p-4 sm:p-5 rounded-2xl bg-emerald-950/70 border-2 border-emerald-400 shadow-[0_0_25px_rgba(16,185,129,0.3)] animate-fade-in shrink-0">
+                    {/* Fastest Finger Speed Bonus Spotlight */}
+                    {(() => {
+                      const correctSubs = Object.values(room.submissions).filter((s) => s.status === 'correct');
+                      correctSubs.sort((a, b) => a.elapsedMs - b.elapsedMs);
+                      const fastest = correctSubs[0];
+                      if (fastest) {
+                        return (
+                          <div className="mb-2.5 py-1 px-3 rounded-full bg-yellow-400/20 border border-yellow-400 text-yellow-300 font-black text-xs inline-flex items-center gap-1.5 shadow-sm">
+                            <Zap className="w-3.5 h-3.5 fill-yellow-400 text-yellow-400" />
+                            <span>
+                              ⚡ FASTEST FINGER: {fastest.playerName} (+5 PTS) in {(fastest.elapsedMs / 1000).toFixed(1)}s!
+                            </span>
+                          </div>
+                        );
+                      }
+                      return null;
+                    })()}
+
                     <div className="text-[10px] font-black uppercase tracking-widest text-emerald-400 mb-0.5">
                       Official Correct Answer
                     </div>
-                    <div className="text-2xl sm:text-3xl lg:text-4xl font-black text-white">
-                      {currentQ.answer}
-                    </div>
+                    <div className="text-2xl sm:text-3xl lg:text-4xl font-black text-white">{currentQ.answer}</div>
                     {currentQ.explanation && (
                       <p className="text-xs sm:text-sm text-emerald-200 font-medium mt-2 border-t border-emerald-800/60 pt-2 line-clamp-2">
                         {currentQ.explanation}
@@ -541,6 +616,21 @@ export const TVView: React.FC<TVViewProps> = ({
                               <span>{sub.playerName}:</span>
                               <span className="font-mono">"{sub.answer}"</span>
                               {sub.status === 'correct' ? ' ✓' : ' ✗'}
+                              {sub.doubleDown && (
+                                <span className="text-[9px] bg-amber-400 text-slate-950 px-1.5 py-0.2 rounded font-black">
+                                  2X
+                                </span>
+                              )}
+                              {sub.pointHeist && (
+                                <span className="text-[9px] bg-rose-500 text-white px-1.5 py-0.2 rounded font-black">
+                                  HEIST
+                                </span>
+                              )}
+                              {sub.speedBonusAwarded ? (
+                                <span className="text-[9px] bg-yellow-400 text-slate-950 px-1.5 py-0.2 rounded font-black">
+                                  +{sub.speedBonusAwarded} SPEED
+                                </span>
+                              ) : null}
                             </span>
                           ))}
                         </div>
@@ -548,7 +638,6 @@ export const TVView: React.FC<TVViewProps> = ({
                     )}
                   </div>
                 )}
-
               </div>
 
               {/* Bottom Subtle Bar */}
@@ -652,6 +741,30 @@ export const TVView: React.FC<TVViewProps> = ({
                   ))}
                 </div>
               )}
+
+              {/* End-of-Night Superlatives Awards Showcase */}
+              {room.superlatives && room.superlatives.length > 0 && (
+                <div className="w-full max-w-xl mt-2 p-3 rounded-2xl bg-slate-950/85 border border-amber-500/30 shrink-0 shadow-lg">
+                  <div className="text-[10px] font-black uppercase tracking-widest text-amber-400 mb-2 flex items-center justify-center gap-1.5">
+                    <Award className="w-3.5 h-3.5" /> End-of-Night Superlatives
+                  </div>
+                  <div className="grid grid-cols-2 sm:grid-cols-3 gap-2">
+                    {room.superlatives.slice(0, 6).map((sup, idx) => (
+                      <div
+                        key={idx}
+                        className="p-2 rounded-xl bg-slate-900 border border-slate-800 text-left flex items-center gap-2"
+                      >
+                        <span className="text-xl">{sup.icon}</span>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[10px] font-black uppercase text-amber-400 truncate">{sup.award}</div>
+                          <div className="text-xs font-bold text-white truncate">{sup.recipientName}</div>
+                          <div className="text-[9px] text-slate-400 truncate">{sup.detail}</div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
             </div>
           )}
 
@@ -718,6 +831,11 @@ export const TVView: React.FC<TVViewProps> = ({
                             </span>
                           )}
                           <span className="font-extrabold truncate max-w-[95px]">{displayName}</span>
+                          {(buzz?.doubleDown || sub?.doubleDown) && (
+                            <span className="text-[9px] bg-amber-400 text-slate-950 px-1.5 py-0.2 rounded font-black shrink-0 shadow-sm">
+                              2X
+                            </span>
+                          )}
                         </div>
 
                         <div className="flex items-center gap-1.5 shrink-0">
