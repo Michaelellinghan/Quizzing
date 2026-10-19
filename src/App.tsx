@@ -3,7 +3,7 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
 import { useQuizSync } from './services/quizSync';
 import { TVView } from './components/TVView';
 import { HostView } from './components/HostView';
@@ -21,7 +21,6 @@ export default function App() {
     return (urlRoom || localStorage.getItem('quizcast_room') || 'QUIZ').trim().toUpperCase();
   });
 
-  // If a user scans a QR code (?room=XXXX), default them to 'player' and lock them there
   const [role, setRole] = useState<'tv' | 'host' | 'player' | null>(() => {
     if (urlRole && ['tv', 'host', 'player'].includes(urlRole)) {
       return urlRole;
@@ -49,30 +48,22 @@ export default function App() {
   const [isAIChatOpen, setIsAIChatOpen] = useState<boolean>(false);
   const [isQuizStudioOpen, setIsQuizStudioOpen] = useState<boolean>(false);
 
-  // Screen Wake Lock so phones don't sleep during a game
-  useEffect(() => {
-    let wakeLock: any = null;
-    const requestWakeLock = async () => {
-      if ('wakeLock' in navigator && document.visibilityState === 'visible') {
-        try {
-          wakeLock = await (navigator as any).wakeLock.request('screen');
-        } catch (e) {}
-      }
-    };
-    requestWakeLock();
-    document.addEventListener('visibilitychange', requestWakeLock);
-    return () => {
-      document.removeEventListener('visibilitychange', requestWakeLock);
-      if (wakeLock) wakeLock.release().catch(() => {});
-    };
-  }, []);
-
   const {
     room,
     connected,
     latencyMs,
     buzzIn,
     submitAnswer,
+    submitLie,
+    startBluffVote,
+    toggleDoubleDown,
+    setConfidence,
+    setHeistTarget,
+    toggleHeistMode,
+    sabotagePlayer,
+    clearSabotage,
+    nextClue,
+    startTimer,
     setPhase,
     toggleLock,
     changeQuestion,
@@ -85,19 +76,7 @@ export default function App() {
     deleteQuestion,
     triggerSound,
     kickPlayer,
-    updatePlayerName,
-    startTimer,
-    pauseTimer,
-    resetTimer,
-    setTimerDuration,
-    toggleAutoLock,
-    triggerSabotage,
-    clearSabotage,
-    revealNextClue,
-    toggleBluffMode,
-    setBluffPhase,
-    submitBluff,
-    voteBluff
+    updatePlayerName
   } = useQuizSync({
     roomCode,
     role,
@@ -128,7 +107,6 @@ export default function App() {
   };
 
   const handleSwitchRole = () => {
-    // Players are not permitted to switch roles to Host or TV
     if (role === 'player') return;
     setRole(null);
     localStorage.removeItem('quizcast_role');
@@ -139,10 +117,9 @@ export default function App() {
 
   const activeQ = room?.questions[room.currentQIndex];
 
-  // 1. TV Display
   if (role === 'tv') {
     return (
-      <div id="tv-viewport-container" className="h-[100dvh] w-screen overflow-hidden bg-[#120924] text-white flex flex-col select-none">
+      <div id="tv-viewport-container" className="h-full w-full overflow-hidden bg-[#120924] text-white flex flex-col select-none">
         <TVView
           room={room}
           onSwitchRole={handleSwitchRole}
@@ -154,16 +131,21 @@ export default function App() {
     );
   }
 
-  // 2. Player Handset (Locked to Player mode — no Header, no role switcher, no scrolling)
   if (role === 'player') {
     return (
-      <div className="h-[100dvh] w-screen overflow-hidden bg-[#120924] text-white flex flex-col select-none">
+      <div className="h-full w-full overflow-hidden bg-[#120924] text-white flex flex-col select-none">
         <PlayerView
           room={room}
           playerId={playerId}
           playerName={playerName}
           onBuzzIn={buzzIn}
           onSubmitAnswer={submitAnswer}
+          onSubmitLie={submitLie}
+          onToggleDoubleDown={toggleDoubleDown}
+          onSetConfidence={setConfidence}
+          onSetHeistTarget={setHeistTarget}
+          onSabotagePlayer={sabotagePlayer}
+          onClearSabotage={clearSabotage}
           latencyMs={latencyMs}
           onUpdatePlayerName={(newName: string) => {
             const trimmed = newName.trim();
@@ -171,18 +153,13 @@ export default function App() {
             localStorage.setItem('quizcast_player_name', trimmed);
             updatePlayerName(trimmed);
           }}
-          onTriggerSabotage={triggerSabotage}
-          onClearSabotage={clearSabotage}
-          onSubmitBluff={submitBluff}
-          onVoteBluff={voteBluff}
         />
       </div>
     );
   }
 
-  // 3. Host Controller or Initial Role Selection
   return (
-    <div className="h-[100dvh] w-screen overflow-hidden bg-[#120924] text-white flex flex-col">
+    <div className="h-full w-full overflow-hidden bg-[#120924] text-white flex flex-col">
       {!role ? (
         <div className="flex-1 overflow-y-auto flex items-center justify-center p-4">
           <RoleSelectModal
@@ -196,6 +173,10 @@ export default function App() {
           room={room}
           onSetPhase={setPhase}
           onToggleLock={toggleLock}
+          onStartTimer={startTimer}
+          onNextClue={nextClue}
+          onStartBluffVote={startBluffVote}
+          onToggleHeistMode={toggleHeistMode}
           onChangeQuestion={changeQuestion}
           onResetBuzzes={resetBuzzes}
           onAdjudicate={adjudicate}
@@ -209,14 +190,6 @@ export default function App() {
           onOpenAIChat={() => setIsAIChatOpen(true)}
           onOpenQuizStudio={() => setIsQuizStudioOpen(true)}
           onSwitchRole={handleSwitchRole}
-          onStartTimer={startTimer}
-          onPauseTimer={pauseTimer}
-          onResetTimer={resetTimer}
-          onSetTimerDuration={setTimerDuration}
-          onToggleAutoLock={toggleAutoLock}
-          onRevealNextClue={revealNextClue}
-          onToggleBluffMode={toggleBluffMode}
-          onSetBluffPhase={setBluffPhase}
         />
       )}
 

@@ -44,66 +44,8 @@ if (apiKey) {
 }
 
 // ---------------- GAME STATE MANAGEMENT ----------------
-export interface Question {
-  id: string;
-  type: 'BUZZER' | 'MCQ' | 'TEXT' | 'NUMERIC' | 'BLUFF';
-  category: string;
-  question: string;
-  options?: string[];
-  answer: string;
-  points: number;
-  mediaType?: 'image' | 'audio' | 'video' | 'none';
-  mediaUrl?: string;
-  explanation?: string;
-  hint?: string;
-}
-
-export interface Player {
-  id: string;
-  name: string;
-  score: number;
-  streak: number;
-  connected: boolean;
-  avatar?: string;
-  lastBuzzTime?: number;
-  lastSeen?: number;
-}
-
-export interface Buzz {
-  playerId: string;
-  playerName: string;
-  timestamp: number;
-  elapsedMs: number;
-  serverOrder: number;
-}
-
-export interface Submission {
-  playerId: string;
-  playerName: string;
-  answer: string;
-  timestamp: number;
-  elapsedMs: number;
-  status: 'pending' | 'correct' | 'wrong';
-  pointsAwarded?: number;
-}
-
-export interface GameRoom {
-  code: string;
-  phase: 'LOBBY' | 'QUESTION' | 'REVEAL' | 'ROUND_STATS' | 'LEADERBOARD';
-  currentQIndex: number;
-  inputOpen: boolean;
-  questionStartTime: number;
-  questions: Question[];
-  currentPackTitle: string;
-  players: Record<string, Player>;
-  buzzes: Buzz[];
-  submissions: Record<string, Submission>;
-  questionHistory: Record<string, { correctCount: number; totalAttempts: number; buzzTimes: number[] }>;
-  soundTrigger?: { sound: string; nonce: number };
-  lastUpdated: number;
-  hostLastSeen?: number;
-  hostConnected?: boolean;
-}
+export type { Question, Player, Buzz, Submission, GameRoom } from './src/types/quiz.js';
+import type { Question, Player, Buzz, Submission, GameRoom } from './src/types/quiz.js';
 
 const rooms: Record<string, GameRoom> = {};
 const roomClients: Record<string, Set<WebSocket>> = {};

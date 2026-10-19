@@ -1,5 +1,13 @@
 import { useEffect, useState, useRef, useCallback } from 'react';
-import { GameRoom, Question, GamePhase, Buzz, Submission } from '../types/quiz';
+import {
+  GameRoom,
+  Question,
+  GamePhase,
+  Buzz,
+  Submission,
+  ConfidenceLevel,
+  SabotageType
+} from '../types/quiz';
 import { DEFAULT_QUIZ_PACKS } from '../data/defaultQuizPacks';
 import { soundEffects } from '../utils/soundEffects';
 import mqtt, { MqttClient } from 'mqtt';
@@ -11,15 +19,6 @@ interface UseQuizSyncProps {
   playerName?: string;
 }
 
-export const CLOUD_RUN_HOST = 'ais-pre-gn2ihvmb443kj3zt3zzttc-148054449091.europe-west2.run.app';
-
-function getBackendHttpUrl(): string {
-  if (typeof window === 'undefined') return '';
-  const envUrl = (import.meta as any).env?.VITE_BACKEND_URL;
-  if (envUrl) return envUrl.replace(/\/$/, '');
-  return '';
-}
-
 function createDefaultRoom(code: string): GameRoom {
   const norm = (code || 'QUIZ').trim().toUpperCase();
   const defaultPack = DEFAULT_QUIZ_PACKS && DEFAULT_QUIZ_PACKS[0] ? DEFAULT_QUIZ_PACKS[0] : null;
@@ -29,6 +28,12 @@ function createDefaultRoom(code: string): GameRoom {
     currentQIndex: 0,
     inputOpen: true,
     questionStartTime: Date.now(),
+    timerSeconds: 0,
+    clueStep: 0,
+    heistActive: false,
+    bluffStage: 'ENTER_LIES',
+    bluffLies: {},
+    bluffOptions: [],
     questions: defaultPack ? [...defaultPack.questions] : [],
     currentPackTitle: defaultPack ? defaultPack.title : 'General Knowledge: Round 1',
     players: {},
@@ -36,27 +41,53 @@ function createDefaultRoom(code: string): GameRoom {
     submissions: {},
     questionHistory: {},
     lastUpdated: Date.now(),
-    revision: 1,
-    timer: {
-      durationSec: 20,
-      remainingSec: 20,
-      running: false,
-      autoLock: true,
-      endsAt: 0
-    },
-    progressiveClueIndex: 0,
-    activeSabotages: {},
-    superlatives: []
+    revision: 1
   };
 }
 
-function cleanAnswerString(str: string): string {
+export function cleanAnswerString(str: string): string {
   return String(str || '')
     .toLowerCase()
     .replace(/^(the|a|an|king|sir|lord)\s+/i, '')
-    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()"'’]/g, '')
-    .replace(/\s+/g, ' ')
-    .trim();
+    .replace(/[^a-z0-9]/g, '');
+}
+
+function isAnswerMatch(submitted: string, officialRaw: string): boolean {
+  const cleanSub = cleanAnswerString(submitted);
+  if (!cleanSub) return false;
+
+  const parts = String(officialRaw || '')
+    .split(/[/,]/)
+    .map((p) => p.replace(/\(.*?\)/g, '').trim())
+    .filter(Boolean);
+
+  const fullOfficialClean = cleanAnswerString(officialRaw.replace(/\(.*?\)/g, ''));
+  if (cleanSub === fullOfficialClean) return true;
+
+  for (const part of parts) {
+    const cleanPart = cleanAnswerString(part);
+    if (!cleanPart) continue;
+    if (cleanSub === cleanPart) return true;
+    // Allow minor singular/plural difference (e.g. "nacho" vs "nachos")
+    if (cleanSub.length >= 4 && (cleanSub + 's' === cleanPart || cleanPart + 's' === cleanSub)) {
+      return true;
+    }
+  }
+  return false;
+}
+
+function resetQuestionPerPlayerState(players: Record<string, any>) {
+  const next: Record<string, any> = {};
+  Object.keys(players).forEach((pid) => {
+    next[pid] = {
+      ...players[pid],
+      doubleDownActive: false,
+      confidence: 'NORMAL',
+      heistTargetId: undefined,
+      sabotageEffect: null
+    };
+  });
+  return next;
 }
 
 export function reduceGameAction(
@@ -76,10 +107,14 @@ export function reduceGameAction(
     players: { ...prevRoom.players },
     buzzes: [...prevRoom.buzzes],
     submissions: { ...prevRoom.submissions },
+    bluffLies: { ...(prevRoom.bluffLies || {}) },
+    bluffOptions: [...(prevRoom.bluffOptions || [])],
     questions: [...prevRoom.questions],
     questionHistory: { ...prevRoom.questionHistory },
     revision: (prevRoom.revision || 1) + 1
   };
+
+  const currentQ = updated.questions[updated.currentQIndex];
 
   switch (type) {
     case 'JOIN_ROOM': {
@@ -91,26 +126,150 @@ export function reduceGameAction(
             name: cleanName,
             score: 0,
             streak: 0,
+            maxStreakLost: 0,
+            totalAnswerMs: 0,
+            answerCount: 0,
+            wagerNet: 0,
             connected: true,
             avatar: `avatar-${(Object.keys(updated.players).length % 8) + 1}`,
             lastSeen: now,
-            doubleDownTokens: 2,
-            sabotageTokens: 1,
-            pointHeistAvailable: true,
-            activeSabotage: null
+            doubleDownUsed: false,
+            doubleDownActive: false,
+            confidence: 'NORMAL',
+            sabotageEffect: null
           };
         } else {
           updated.players[playerId] = {
             ...updated.players[playerId],
             connected: true,
             lastSeen: now,
-            name: cleanName && cleanName !== 'Player' ? cleanName : updated.players[playerId].name,
-            doubleDownTokens: updated.players[playerId].doubleDownTokens ?? 2,
-            sabotageTokens: updated.players[playerId].sabotageTokens ?? 1,
-            pointHeistAvailable: updated.players[playerId].pointHeistAvailable ?? true
+            name: cleanName && cleanName !== 'Player' ? cleanName : updated.players[playerId].name
           };
         }
       }
+      break;
+    }
+
+    case 'TOGGLE_DOUBLE_DOWN': {
+      if (playerId && updated.players[playerId] && updated.inputOpen && updated.phase === 'QUESTION') {
+        const p = updated.players[playerId];
+        if (!p.doubleDownUsed && !updated.submissions[playerId]) {
+          updated.players[playerId] = {
+            ...p,
+            doubleDownActive: !p.doubleDownActive
+          };
+        }
+      }
+      break;
+    }
+
+    case 'SET_CONFIDENCE': {
+      const level = payload?.level as ConfidenceLevel;
+      if (
+        playerId &&
+        updated.players[playerId] &&
+        ['SAFE', 'NORMAL', 'ALL_IN'].includes(level) &&
+        !updated.submissions[playerId]
+      ) {
+        updated.players[playerId] = {
+          ...updated.players[playerId],
+          confidence: level
+        };
+      }
+      break;
+    }
+
+    case 'SET_HEIST_TARGET': {
+      const targetId = payload?.targetPlayerId;
+      if (playerId && updated.players[playerId] && targetId && targetId !== playerId) {
+        updated.players[playerId] = {
+          ...updated.players[playerId],
+          heistTargetId: targetId
+        };
+      }
+      break;
+    }
+
+    case 'TOGGLE_HEIST_MODE': {
+      updated.heistActive = payload?.active ?? !updated.heistActive;
+      updated.soundTrigger = { sound: 'unlock', nonce: Math.random() };
+      break;
+    }
+
+    case 'SABOTAGE_PLAYER': {
+      const targetId = payload?.targetPlayerId;
+      const sabType = (payload?.sabotageType || 'ICE') as SabotageType;
+      if (
+        playerId &&
+        targetId &&
+        updated.players[playerId] &&
+        updated.players[targetId] &&
+        updated.players[playerId].score >= 5
+      ) {
+        updated.players[playerId] = {
+          ...updated.players[playerId],
+          score: Math.max(0, updated.players[playerId].score - 5)
+        };
+        updated.players[targetId] = {
+          ...updated.players[targetId],
+          sabotageEffect: {
+            type: sabType,
+            fromName: updated.players[playerId].name,
+            nonce: Math.random()
+          }
+        };
+        updated.soundTrigger = { sound: 'buzzer', nonce: Math.random() };
+      }
+      break;
+    }
+
+    case 'CLEAR_SABOTAGE': {
+      if (playerId && updated.players[playerId]) {
+        updated.players[playerId] = {
+          ...updated.players[playerId],
+          sabotageEffect: null
+        };
+      }
+      break;
+    }
+
+    case 'NEXT_CLUE': {
+      const maxClues = currentQ?.clues?.length || 4;
+      updated.clueStep = Math.min(maxClues - 1, (updated.clueStep || 0) + 1);
+      updated.soundTrigger = { sound: 'ding', nonce: Math.random() };
+      break;
+    }
+
+    case 'SUBMIT_LIE': {
+      if (!playerId || !updated.inputOpen || updated.phase !== 'QUESTION') break;
+      const lieText = String(payload?.lie || '').trim();
+      if (!lieText) break;
+      if (isAnswerMatch(lieText, currentQ?.answer || '')) break;
+      updated.bluffLies = {
+        ...(updated.bluffLies || {}),
+        [playerId]: lieText
+      };
+      updated.soundTrigger = { sound: 'ding', nonce: Math.random() };
+      break;
+    }
+
+    case 'START_BLUFF_VOTE': {
+      if (!currentQ) break;
+      const liesList = Object.values(updated.bluffLies || {});
+      const uniquePool = Array.from(new Set([...liesList, currentQ.answer]));
+      uniquePool.sort((a, b) => a.localeCompare(b));
+      updated.bluffStage = 'VOTE';
+      updated.bluffOptions = uniquePool;
+      updated.soundTrigger = { sound: 'whoosh', nonce: Math.random() };
+      break;
+    }
+
+    case 'START_TIMER': {
+      const seconds = Number(payload?.seconds || 20);
+      updated.timerSeconds = seconds;
+      updated.questionStartTime = now;
+      updated.inputOpen = true;
+      updated.soundTrigger = { sound: 'ding', nonce: Math.random() };
       break;
     }
 
@@ -120,157 +279,98 @@ export function reduceGameAction(
         updated.phase = newPhase;
         if (newPhase === 'QUESTION') {
           updated.questionStartTime = now;
+          updated.timerSeconds = 0;
+          updated.clueStep = 0;
+          updated.bluffStage = 'ENTER_LIES';
+          updated.bluffLies = {};
+          updated.bluffOptions = [];
           updated.inputOpen = payload?.inputOpen ?? true;
           updated.buzzes = [];
           updated.submissions = {};
-          updated.progressiveClueIndex = 0;
-          updated.lastHeistEvent = null;
-          // Auto-start 20s timer on Question phase
-          const dur = updated.timer?.durationSec || 20;
-          updated.timer = {
-            durationSec: dur,
-            remainingSec: dur,
-            running: true,
-            autoLock: updated.timer?.autoLock ?? true,
-            endsAt: now + dur * 1000
-          };
+          updated.players = resetQuestionPerPlayerState(updated.players);
           updated.soundTrigger = { sound: 'whoosh', nonce: Math.random() };
         } else if (newPhase === 'REVEAL') {
           updated.inputOpen = false;
-          if (updated.timer) {
-            updated.timer = { ...updated.timer, running: false };
+          updated.timerSeconds = 0;
+
+          if (currentQ?.type === 'NUMBER') {
+            const targetVal = parseFloat(String(currentQ.answer).replace(/[^0-9.-]/g, ''));
+            if (!isNaN(targetVal)) {
+              let bestDiff = Infinity;
+              let closestWinners: string[] = [];
+              Object.values(updated.submissions).forEach((sub) => {
+                const num = parseFloat(String(sub.answer).replace(/[^0-9.-]/g, ''));
+                if (!isNaN(num) && num <= targetVal) {
+                  const diff = targetVal - num;
+                  if (diff < bestDiff) {
+                    bestDiff = diff;
+                    closestWinners = [sub.playerId];
+                  } else if (diff === bestDiff) {
+                    closestWinners.push(sub.playerId);
+                  }
+                }
+              });
+              if (closestWinners.length === 0) {
+                Object.values(updated.submissions).forEach((sub) => {
+                  const num = parseFloat(String(sub.answer).replace(/[^0-9.-]/g, ''));
+                  if (!isNaN(num)) {
+                    const diff = Math.abs(targetVal - num);
+                    if (diff < bestDiff) {
+                      bestDiff = diff;
+                      closestWinners = [sub.playerId];
+                    } else if (diff === bestDiff) {
+                      closestWinners.push(sub.playerId);
+                    }
+                  }
+                });
+              }
+              Object.keys(updated.submissions).forEach((pid) => {
+                const isWin = closestWinners.includes(pid);
+                const pts = isWin ? currentQ.points || 10 : 0;
+                updated.submissions[pid] = {
+                  ...updated.submissions[pid],
+                  status: isWin ? 'correct' : 'wrong',
+                  pointsAwarded: pts
+                };
+                if (isWin && updated.players[pid]) {
+                  updated.players[pid].score += pts;
+                  updated.players[pid].streak += 1;
+                } else if (updated.players[pid]) {
+                  updated.players[pid].maxStreakLost = Math.max(
+                    updated.players[pid].maxStreakLost || 0,
+                    updated.players[pid].streak || 0
+                  );
+                  updated.players[pid].streak = 0;
+                }
+              });
+            }
           }
 
-          // 1. FASTEST FINGER SPEED BONUSES:
-          // Find all correct submissions for this question sorted by speed
-          const correctSubs = Object.values(updated.submissions).filter((s) => s.status === 'correct');
-          correctSubs.sort((a, b) => a.elapsedMs - b.elapsedMs);
-          const bonuses = [5, 3, 1];
-          correctSubs.forEach((sub, rank) => {
-            if (rank < bonuses.length && !sub.speedBonusAwarded) {
-              const bonusPts = bonuses[rank];
-              sub.speedBonusAwarded = bonusPts;
-              if (updated.players[sub.playerId]) {
-                updated.players[sub.playerId].score += bonusPts;
+          if (updated.heistActive) {
+            Object.keys(updated.players).forEach((pid) => {
+              const p = updated.players[pid];
+              const targetId = p.heistTargetId;
+              if (targetId && updated.players[targetId]) {
+                const mySub = updated.submissions[pid];
+                const targetSub = updated.submissions[targetId];
+                if (mySub?.status === 'correct' && targetSub?.status !== 'correct') {
+                  const steal = Math.min(10, updated.players[targetId].score);
+                  updated.players[targetId].score = Math.max(0, updated.players[targetId].score - steal);
+                  updated.players[pid].score += steal;
+                  updated.players[pid].wagerNet = (updated.players[pid].wagerNet || 0) + steal;
+                  updated.submissions[pid] = {
+                    ...mySub,
+                    heistStolen: steal
+                  };
+                }
               }
-            }
-          });
-
-          // 2. POINT HEIST:
-          // Check if any player activated Point Heist and answered correctly
-          const heistSub = Object.values(updated.submissions).find((s) => s.pointHeist && s.status === 'correct');
-          if (heistSub && updated.players[heistSub.playerId]) {
-            const others = Object.values(updated.players)
-              .filter((p) => p.id !== heistSub.playerId)
-              .sort((a, b) => b.score - a.score);
-            const leader = others[0];
-            if (leader && leader.score > 0) {
-              const stolen = Math.min(10, leader.score);
-              leader.score -= stolen;
-              updated.players[heistSub.playerId].score += stolen;
-              updated.lastHeistEvent = {
-                fromName: leader.name,
-                toName: heistSub.playerName,
-                points: stolen,
-                timestamp: now
-              };
-            }
+            });
           }
 
           updated.soundTrigger = { sound: 'ding', nonce: Math.random() };
-        } else if (newPhase === 'ROUND_STATS') {
+        } else if (newPhase === 'ROUND_STATS' || newPhase === 'LEADERBOARD') {
           updated.inputOpen = false;
-          if (updated.timer) {
-            updated.timer = { ...updated.timer, running: false };
-          }
-          updated.soundTrigger = { sound: 'fanfare', nonce: Math.random() };
-        } else if (newPhase === 'LEADERBOARD') {
-          updated.inputOpen = false;
-          if (updated.timer) {
-            updated.timer = { ...updated.timer, running: false };
-          }
-
-          // Compute End-of-Night Superlatives!
-          const playersArr = Object.values(updated.players);
-          if (playersArr.length > 0) {
-            const superlatives: { award: string; icon: string; recipientName: string; detail: string }[] = [];
-            const sortedByScore = [...playersArr].sort((a, b) => b.score - a.score);
-            superlatives.push({
-              award: 'Grand Champion',
-              icon: '👑',
-              recipientName: sortedByScore[0].name,
-              detail: `${sortedByScore[0].score} total points scored`
-            });
-
-            // Speed Demon
-            let fastestBuzzTime = Infinity;
-            let fastestBuzzPlayer = '';
-            updated.buzzes.forEach((b) => {
-              if (b.elapsedMs < fastestBuzzTime) {
-                fastestBuzzTime = b.elapsedMs;
-                fastestBuzzPlayer = b.playerName;
-              }
-            });
-            if (fastestBuzzPlayer && fastestBuzzTime < 15000) {
-              superlatives.push({
-                award: 'Speed Demon',
-                icon: '⚡',
-                recipientName: fastestBuzzPlayer,
-                detail: `Fastest buzz in ${Math.round(fastestBuzzTime)}ms`
-              });
-            }
-
-            // Streak Master
-            const bestStreak = [...playersArr].sort((a, b) => (b.streak || 0) - (a.streak || 0))[0];
-            if (bestStreak && bestStreak.streak > 0) {
-              superlatives.push({
-                award: 'Streak Master',
-                icon: '🔥',
-                recipientName: bestStreak.name,
-                detail: `${bestStreak.streak} question win streak`
-              });
-            }
-
-            // Sharpshooter
-            const correctCounts: Record<string, number> = {};
-            Object.values(updated.submissions).forEach((s) => {
-              if (s.status === 'correct') {
-                correctCounts[s.playerName] = (correctCounts[s.playerName] || 0) + 1;
-              }
-            });
-            const sharpshooter = Object.entries(correctCounts).sort((a, b) => b[1] - a[1])[0];
-            if (sharpshooter && sharpshooter[1] > 0) {
-              superlatives.push({
-                award: 'Sharpshooter',
-                icon: '🎯',
-                recipientName: sharpshooter[0],
-                detail: `${sharpshooter[1]} verified correct answers`
-              });
-            }
-
-            // High Roller
-            const doubleDownWins = Object.values(updated.submissions).filter((s) => s.doubleDown && s.status === 'correct');
-            if (doubleDownWins.length > 0) {
-              superlatives.push({
-                award: 'High Roller',
-                icon: '🎲',
-                recipientName: doubleDownWins[0].playerName,
-                detail: `Bold 2x Double-Down victory`
-              });
-            }
-
-            if (sortedByScore.length >= 2) {
-              superlatives.push({
-                award: 'Crowd Favorite',
-                icon: '🌟',
-                recipientName: sortedByScore[sortedByScore.length - 1].name,
-                detail: `Maximum energy and pub quiz heart!`
-              });
-            }
-
-            updated.superlatives = superlatives;
-          }
-
+          updated.timerSeconds = 0;
           updated.soundTrigger = { sound: 'fanfare', nonce: Math.random() };
         }
       }
@@ -284,18 +384,15 @@ export function reduceGameAction(
         updated.buzzes = [];
         updated.submissions = {};
         updated.inputOpen = true;
+        updated.timerSeconds = 0;
+        updated.clueStep = 0;
+        updated.heistActive = false;
+        updated.bluffStage = 'ENTER_LIES';
+        updated.bluffLies = {};
+        updated.bluffOptions = [];
         updated.questionStartTime = now;
         updated.phase = 'QUESTION';
-        updated.progressiveClueIndex = 0;
-        updated.lastHeistEvent = null;
-        const dur = updated.timer?.durationSec || 20;
-        updated.timer = {
-          durationSec: dur,
-          remainingSec: dur,
-          running: true,
-          autoLock: updated.timer?.autoLock ?? true,
-          endsAt: now + dur * 1000
-        };
+        updated.players = resetQuestionPerPlayerState(updated.players);
         updated.soundTrigger = { sound: 'whoosh', nonce: Math.random() };
       }
       break;
@@ -304,8 +401,8 @@ export function reduceGameAction(
     case 'TOGGLE_LOCK': {
       const wasOpen = updated.inputOpen;
       updated.inputOpen = payload?.open ?? !updated.inputOpen;
-      if (updated.inputOpen && updated.questionStartTime === 0) {
-        updated.questionStartTime = now;
+      if (!updated.inputOpen) {
+        updated.timerSeconds = 0;
       }
       if (updated.inputOpen && !wasOpen) {
         updated.soundTrigger = { sound: 'unlock', nonce: Math.random() };
@@ -324,29 +421,14 @@ export function reduceGameAction(
       if (!playerId || !updated.inputOpen || updated.phase !== 'QUESTION') break;
       if (!updated.buzzes.some((b) => b.playerId === playerId)) {
         const elapsed = updated.questionStartTime > 0 ? now - updated.questionStartTime : 0;
-        const isDoubleDown = Boolean(payload?.doubleDown);
-        if (isDoubleDown && updated.players[playerId] && (updated.players[playerId].doubleDownTokens ?? 2) > 0) {
-          updated.players[playerId].doubleDownTokens = Math.max(0, (updated.players[playerId].doubleDownTokens ?? 2) - 1);
-        }
-
         const newBuzz: Buzz = {
           playerId,
           playerName: updated.players[playerId]?.name || playerName || 'Player',
           timestamp: now,
           elapsedMs: Math.max(1, elapsed),
-          serverOrder: updated.buzzes.length + 1,
-          doubleDown: isDoubleDown
+          serverOrder: updated.buzzes.length + 1
         };
         updated.buzzes.push(newBuzz);
-
-        const currentQ = updated.questions[updated.currentQIndex];
-        if (currentQ) {
-          if (!updated.questionHistory[currentQ.id]) {
-            updated.questionHistory[currentQ.id] = { correctCount: 0, totalAttempts: 0, buzzTimes: [] };
-          }
-          updated.questionHistory[currentQ.id].buzzTimes.push(newBuzz.elapsedMs);
-        }
-
         updated.soundTrigger = { sound: 'buzzer', nonce: Math.random() };
       }
       break;
@@ -356,60 +438,77 @@ export function reduceGameAction(
       if (!playerId || !updated.inputOpen || updated.phase !== 'QUESTION') break;
       const answer = String(payload?.answer || '').trim();
       if (!answer) break;
-
       const elapsed = updated.questionStartTime > 0 ? now - updated.questionStartTime : 0;
-      const currentQ = updated.questions[updated.currentQIndex];
-      const cleanSubmitted = cleanAnswerString(answer);
-      const rawOfficial = String(currentQ?.answer || '');
-      const acceptableAnswers = rawOfficial
-        .split(/\s*\/\s*/)
-        .map((part) => cleanAnswerString(part))
-        .filter(Boolean);
+      const matched = isAnswerMatch(answer, currentQ?.answer || '');
 
       let autoStatus: 'pending' | 'correct' | 'wrong' = 'pending';
-      if (currentQ?.type === 'MCQ' && acceptableAnswers.length > 0) {
-        autoStatus = acceptableAnswers.includes(cleanSubmitted) ? 'correct' : 'wrong';
-      } else if (currentQ?.type === 'NUMERIC') {
-        const numSubmitted = parseFloat(cleanSubmitted.replace(/[^0-9.-]/g, ''));
-        const numOfficial = parseFloat(rawOfficial.replace(/[^0-9.-]/g, ''));
-        if (!isNaN(numSubmitted) && !isNaN(numOfficial)) {
-          const diff = Math.abs(numSubmitted - numOfficial);
-          autoStatus = diff === 0 || (numOfficial !== 0 && diff / Math.abs(numOfficial) <= 0.05) ? 'correct' : 'wrong';
-        } else {
-          autoStatus = acceptableAnswers.includes(cleanSubmitted) ? 'correct' : 'wrong';
-        }
-      } else if (acceptableAnswers.length > 0) {
-        if (acceptableAnswers.includes(cleanSubmitted)) {
-          autoStatus = 'correct';
-        } else {
-          autoStatus = 'pending';
-        }
+      if (currentQ?.type === 'NUMBER') {
+        autoStatus = 'pending';
+      } else if (currentQ?.type === 'MCQ' || currentQ?.type === 'BLUFF') {
+        autoStatus = matched ? 'correct' : 'wrong';
+      } else {
+        autoStatus = matched ? 'correct' : 'pending';
       }
 
+      const playerObj = updated.players[playerId];
       const prevSub = updated.submissions[playerId];
-      if (prevSub && prevSub.status === 'correct' && updated.players[playerId]) {
-        updated.players[playerId].score = Math.max(
-          0,
-          updated.players[playerId].score - (prevSub.pointsAwarded || currentQ?.points || 10)
+      if (prevSub && playerObj) {
+        updated.players[playerId] = {
+          ...playerObj,
+          score: Math.max(0, playerObj.score - (prevSub.pointsAwarded || 0))
+        };
+      }
+
+      if (currentQ?.type === 'BLUFF' && updated.bluffStage === 'VOTE' && autoStatus === 'wrong') {
+        const liarEntry = Object.entries(updated.bluffLies || {}).find(
+          ([liarPid, lieVal]) => liarPid !== playerId && isAnswerMatch(answer, lieVal)
         );
+        if (liarEntry) {
+          const [liarPid] = liarEntry;
+          if (updated.players[liarPid]) {
+            updated.players[liarPid] = {
+              ...updated.players[liarPid],
+              score: updated.players[liarPid].score + 5,
+              wagerNet: (updated.players[liarPid].wagerNet || 0) + 5
+            };
+          }
+        }
       }
 
-      const isDoubleDown = Boolean(payload?.doubleDown || prevSub?.doubleDown);
-      const isPointHeist = Boolean(payload?.pointHeist || prevSub?.pointHeist);
+      const isDoubled = Boolean(playerObj?.doubleDownActive || prevSub?.doubledDown);
+      const confidence: ConfidenceLevel = playerObj?.confidence || prevSub?.confidence || 'NORMAL';
 
-      if (isDoubleDown && updated.players[playerId] && (updated.players[playerId].doubleDownTokens ?? 2) > 0 && !prevSub?.doubleDown) {
-        updated.players[playerId].doubleDownTokens = Math.max(0, (updated.players[playerId].doubleDownTokens ?? 2) - 1);
+      if (playerObj && isDoubled) {
+        updated.players[playerId] = {
+          ...updated.players[playerId],
+          doubleDownUsed: true,
+          doubleDownActive: false
+        };
       }
-      if (isPointHeist && updated.players[playerId] && !prevSub?.pointHeist) {
-        updated.players[playerId].pointHeistAvailable = false;
-      }
+
+      const existingCorrectCount = Object.values(updated.submissions).filter(
+        (s) => s.playerId !== playerId && s.status === 'correct'
+      ).length;
+      const speedBonus = autoStatus === 'correct' ? Math.max(0, 3 - existingCorrectCount) : 0;
 
       let basePoints = currentQ?.points || 10;
-      if (isDoubleDown) {
-        basePoints *= 2;
+      if (currentQ?.type === 'CLUES') {
+        const step = updated.clueStep || 0;
+        basePoints = Math.max(5, 20 - step * 5);
+      } else if (confidence === 'SAFE') {
+        basePoints = 3;
+      } else if (confidence === 'ALL_IN') {
+        basePoints = 15;
       }
 
-      const pointsAwarded = autoStatus === 'correct' ? basePoints : 0;
+      let pointsAwarded = 0;
+      if (autoStatus === 'correct') {
+        pointsAwarded = (isDoubled ? basePoints * 2 : basePoints) + speedBonus;
+      } else if (autoStatus === 'wrong') {
+        if (isDoubled) pointsAwarded -= basePoints;
+        if (confidence === 'ALL_IN') pointsAwarded -= 10;
+      }
+
       const subObj: Submission = {
         playerId,
         playerName: updated.players[playerId]?.name || playerName || 'Player',
@@ -418,8 +517,9 @@ export function reduceGameAction(
         elapsedMs: Math.max(1, elapsed),
         status: autoStatus,
         pointsAwarded,
-        doubleDown: isDoubleDown,
-        pointHeist: isPointHeist
+        speedBonus,
+        doubledDown: isDoubled,
+        confidence
       };
       updated.submissions[playerId] = subObj;
 
@@ -429,29 +529,35 @@ export function reduceGameAction(
           playerName: updated.players[playerId]?.name || playerName || 'Player',
           timestamp: now,
           elapsedMs: Math.max(1, elapsed),
-          serverOrder: updated.buzzes.length + 1,
-          doubleDown: isDoubleDown
+          serverOrder: updated.buzzes.length + 1
         });
       }
 
-      if (autoStatus === 'correct' && updated.players[playerId]) {
-        updated.players[playerId].score += pointsAwarded;
-        updated.players[playerId].streak += 1;
-        updated.soundTrigger = { sound: 'correct', nonce: Math.random() };
-      } else if (autoStatus === 'wrong' && updated.players[playerId]) {
-        updated.players[playerId].streak = 0;
-        updated.soundTrigger = { sound: 'wrong', nonce: Math.random() };
-      } else {
-        updated.soundTrigger = { sound: 'ding', nonce: Math.random() };
-      }
+      if (updated.players[playerId]) {
+        const p = updated.players[playerId];
+        const nextScore = Math.max(0, p.score + pointsAwarded);
+        const wagerDelta = isDoubled || confidence !== 'NORMAL' ? pointsAwarded : 0;
 
-      if (currentQ) {
-        if (!updated.questionHistory[currentQ.id]) {
-          updated.questionHistory[currentQ.id] = { correctCount: 0, totalAttempts: 0, buzzTimes: [] };
-        }
-        updated.questionHistory[currentQ.id].totalAttempts += 1;
+        updated.players[playerId] = {
+          ...p,
+          score: nextScore,
+          totalAnswerMs: (p.totalAnswerMs || 0) + Math.max(1, elapsed),
+          answerCount: (p.answerCount || 0) + 1,
+          wagerNet: (p.wagerNet || 0) + wagerDelta
+        };
+
         if (autoStatus === 'correct') {
-          updated.questionHistory[currentQ.id].correctCount += 1;
+          updated.players[playerId].streak += 1;
+          updated.soundTrigger = { sound: 'correct', nonce: Math.random() };
+        } else if (autoStatus === 'wrong') {
+          updated.players[playerId].maxStreakLost = Math.max(
+            updated.players[playerId].maxStreakLost || 0,
+            updated.players[playerId].streak || 0
+          );
+          updated.players[playerId].streak = 0;
+          updated.soundTrigger = { sound: 'wrong', nonce: Math.random() };
+        } else {
+          updated.soundTrigger = { sound: 'ding', nonce: Math.random() };
         }
       }
       break;
@@ -460,31 +566,53 @@ export function reduceGameAction(
     case 'ADJUDICATE': {
       const targetPid = payload?.playerId;
       const status = payload?.status as 'correct' | 'wrong';
-      const points = Number(payload?.points || 10);
+      const basePoints = Number(payload?.points || 10);
       if (targetPid && updated.players[targetPid]) {
         const prevSub = updated.submissions[targetPid];
-        const alreadyAwarded = prevSub?.status === 'correct' ? (prevSub.pointsAwarded ?? points) : 0;
+        const prevAwarded = prevSub?.pointsAwarded || 0;
+        const isDoubled = Boolean(prevSub?.doubledDown || updated.players[targetPid].doubleDownActive);
+        const confidence = prevSub?.confidence || updated.players[targetPid].confidence || 'NORMAL';
 
+        let cleanScore = Math.max(0, updated.players[targetPid].score - prevAwarded);
+
+        let effectiveBase = basePoints;
+        if (confidence === 'SAFE') effectiveBase = 3;
+        if (confidence === 'ALL_IN') effectiveBase = 15;
+
+        let newAwarded = 0;
         if (status === 'correct') {
-          const delta = Math.max(0, points - alreadyAwarded);
-          updated.players[targetPid].score += delta;
+          newAwarded = isDoubled ? effectiveBase * 2 : effectiveBase;
+          cleanScore += newAwarded;
           if (prevSub?.status !== 'correct') {
             updated.players[targetPid].streak += 1;
           }
           updated.soundTrigger = { sound: 'correct', nonce: Math.random() };
-        } else if (status === 'wrong') {
-          updated.players[targetPid].score = Math.max(0, updated.players[targetPid].score - alreadyAwarded);
+        } else {
+          if (isDoubled) newAwarded -= effectiveBase;
+          if (confidence === 'ALL_IN') newAwarded -= 10;
+          cleanScore = Math.max(0, cleanScore + newAwarded);
+          updated.players[targetPid].maxStreakLost = Math.max(
+            updated.players[targetPid].maxStreakLost || 0,
+            updated.players[targetPid].streak || 0
+          );
           updated.players[targetPid].streak = 0;
           updated.soundTrigger = { sound: 'wrong', nonce: Math.random() };
         }
 
-        if (prevSub) {
-          updated.submissions[targetPid] = {
-            ...prevSub,
-            status,
-            pointsAwarded: status === 'correct' ? points : 0
-          };
-        }
+        updated.players[targetPid].score = cleanScore;
+        updated.submissions[targetPid] = {
+          ...(prevSub || {
+            playerId: targetPid,
+            playerName: updated.players[targetPid].name,
+            answer: 'Host Ruling',
+            timestamp: now,
+            elapsedMs: 1000
+          }),
+          status,
+          pointsAwarded: newAwarded,
+          doubledDown: isDoubled,
+          confidence
+        };
       }
       break;
     }
@@ -494,6 +622,10 @@ export function reduceGameAction(
       const delta = Number(payload?.delta || 0);
       if (targetPid && updated.players[targetPid]) {
         updated.players[targetPid].score = Math.max(0, updated.players[targetPid].score + delta);
+        updated.soundTrigger = {
+          sound: delta >= 0 ? 'correct' : 'wrong',
+          nonce: Math.random()
+        };
       }
       break;
     }
@@ -509,56 +641,23 @@ export function reduceGameAction(
       updated.currentQIndex = 0;
       updated.buzzes = [];
       updated.submissions = {};
+      updated.timerSeconds = 0;
+      updated.clueStep = 0;
+      updated.heistActive = false;
+      updated.bluffStage = 'ENTER_LIES';
+      updated.bluffLies = {};
+      updated.bluffOptions = [];
       updated.phase = 'LOBBY';
-      break;
-    }
-
-    case 'ADD_QUESTION': {
-      const newQ = payload?.question;
-      if (newQ && newQ.question && newQ.answer) {
-        const questionObj: Question = {
-          id: newQ.id || `q_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`,
-          type: newQ.type || 'BUZZER',
-          category: newQ.category || 'Bonus Question',
-          question: newQ.question.trim(),
-          options: Array.isArray(newQ.options) ? newQ.options : [],
-          answer: newQ.answer.trim(),
-          points: Number(newQ.points) || 10,
-          mediaType: newQ.mediaType || 'none',
-          mediaUrl: newQ.mediaUrl || undefined,
-          explanation: newQ.explanation || undefined,
-          hint: newQ.hint || undefined
+      Object.keys(updated.players).forEach((pid) => {
+        updated.players[pid] = {
+          ...updated.players[pid],
+          doubleDownUsed: false,
+          doubleDownActive: false,
+          confidence: 'NORMAL',
+          heistTargetId: undefined,
+          sabotageEffect: null
         };
-        const insertAt = payload?.insertAt;
-        if (typeof insertAt === 'number' && insertAt >= 0 && insertAt <= updated.questions.length) {
-          updated.questions.splice(insertAt, 0, questionObj);
-        } else {
-          updated.questions.push(questionObj);
-        }
-      }
-      break;
-    }
-
-    case 'EDIT_QUESTION': {
-      const qIndex = payload?.index;
-      const qData = payload?.question;
-      if (typeof qIndex === 'number' && qIndex >= 0 && qIndex < updated.questions.length && qData) {
-        updated.questions[qIndex] = {
-          ...updated.questions[qIndex],
-          ...qData
-        };
-      }
-      break;
-    }
-
-    case 'DELETE_QUESTION': {
-      const delIndex = payload?.index;
-      if (typeof delIndex === 'number' && delIndex >= 0 && delIndex < updated.questions.length) {
-        updated.questions.splice(delIndex, 1);
-        if (updated.currentQIndex >= updated.questions.length) {
-          updated.currentQIndex = Math.max(0, updated.questions.length - 1);
-        }
-      }
+      });
       break;
     }
 
@@ -577,167 +676,6 @@ export function reduceGameAction(
       break;
     }
 
-    case 'START_TIMER': {
-      const dur = Number(payload?.durationSec) || updated.timer?.durationSec || 20;
-      updated.timer = {
-        durationSec: dur,
-        remainingSec: dur,
-        running: true,
-        autoLock: payload?.autoLock ?? (updated.timer?.autoLock ?? true),
-        endsAt: now + dur * 1000
-      };
-      updated.soundTrigger = { sound: 'unlock', nonce: Math.random() };
-      break;
-    }
-
-    case 'PAUSE_TIMER': {
-      if (updated.timer) {
-        updated.timer = { ...updated.timer, running: false };
-      }
-      break;
-    }
-
-    case 'RESET_TIMER': {
-      const dur = Number(payload?.durationSec) || updated.timer?.durationSec || 20;
-      updated.timer = {
-        durationSec: dur,
-        remainingSec: dur,
-        running: false,
-        autoLock: updated.timer?.autoLock ?? true,
-        endsAt: 0
-      };
-      break;
-    }
-
-    case 'SET_TIMER_DURATION': {
-      const dur = Math.max(5, Number(payload?.durationSec) || 20);
-      if (updated.timer) {
-        updated.timer = {
-          ...updated.timer,
-          durationSec: dur,
-          remainingSec: dur
-        };
-      }
-      break;
-    }
-
-    case 'TOGGLE_AUTO_LOCK': {
-      if (updated.timer) {
-        updated.timer = {
-          ...updated.timer,
-          autoLock: payload?.autoLock ?? !updated.timer.autoLock
-        };
-      }
-      break;
-    }
-
-    case 'TIMER_TICK': {
-      if (updated.timer && updated.timer.running && updated.phase === 'QUESTION') {
-        const newRem = Math.max(0, updated.timer.remainingSec - 1);
-        updated.timer = {
-          ...updated.timer,
-          remainingSec: newRem
-        };
-        if (newRem <= 0) {
-          updated.timer.running = false;
-          if (updated.timer.autoLock) {
-            updated.inputOpen = false;
-            updated.soundTrigger = { sound: 'buzzer', nonce: Math.random() };
-          }
-        } else if (newRem <= 5) {
-          updated.soundTrigger = { sound: 'tick', nonce: Math.random() };
-        }
-      }
-      break;
-    }
-
-    case 'TRIGGER_SABOTAGE': {
-      const targetPid = payload?.targetPlayerId;
-      const sabType = (payload?.type || 'ink') as 'ink' | 'frost' | 'scramble';
-      const attacker = updated.players[playerId || ''];
-      if (targetPid && updated.players[targetPid] && attacker && (attacker.sabotageTokens ?? 1) > 0) {
-        attacker.sabotageTokens = Math.max(0, (attacker.sabotageTokens ?? 1) - 1);
-        const sabObj = {
-          type: sabType,
-          fromName: attacker.name,
-          expiresAt: now + 6000
-        };
-        updated.players[targetPid].activeSabotage = sabObj;
-        if (!updated.activeSabotages) updated.activeSabotages = {};
-        updated.activeSabotages[targetPid] = sabObj;
-        updated.soundTrigger = { sound: 'whoosh', nonce: Math.random() };
-      }
-      break;
-    }
-
-    case 'CLEAR_SABOTAGE': {
-      const targetPid = payload?.targetPlayerId || playerId;
-      if (targetPid && updated.players[targetPid]) {
-        updated.players[targetPid].activeSabotage = null;
-        if (updated.activeSabotages) {
-          delete updated.activeSabotages[targetPid];
-        }
-      }
-      break;
-    }
-
-    case 'REVEAL_NEXT_CLUE': {
-      const currentQ = updated.questions[updated.currentQIndex];
-      const clues = currentQ?.progressiveClues || (currentQ?.hint ? [currentQ.hint] : []);
-      const nextIdx = (updated.progressiveClueIndex ?? 0) + 1;
-      if (nextIdx <= clues.length) {
-        updated.progressiveClueIndex = nextIdx;
-        updated.soundTrigger = { sound: 'ding', nonce: Math.random() };
-      }
-      break;
-    }
-
-    case 'TOGGLE_BLUFF_MODE': {
-      const active = payload?.active ?? !(updated.bluffMode?.active);
-      updated.bluffMode = {
-        active,
-        phase: 'bluffing',
-        bluffs: {}
-      };
-      updated.soundTrigger = { sound: 'whoosh', nonce: Math.random() };
-      break;
-    }
-
-    case 'SET_BLUFF_PHASE': {
-      const phase = (payload?.phase || 'voting') as 'bluffing' | 'voting';
-      if (updated.bluffMode) {
-        updated.bluffMode.phase = phase;
-      }
-      break;
-    }
-
-    case 'SUBMIT_BLUFF': {
-      const text = String(payload?.text || '').trim();
-      if (playerId && text && updated.bluffMode) {
-        updated.bluffMode.bluffs[playerId] = {
-          playerId,
-          playerName: updated.players[playerId]?.name || playerName || 'Player',
-          text,
-          votes: []
-        };
-      }
-      break;
-    }
-
-    case 'VOTE_BLUFF': {
-      const votedTargetId = payload?.targetPlayerId;
-      if (playerId && votedTargetId && updated.bluffMode) {
-        const entry = updated.bluffMode.bluffs[votedTargetId];
-        if (entry && !entry.votes.includes(playerId)) {
-          entry.votes.push(playerId);
-          if (updated.players[votedTargetId]) {
-            updated.players[votedTargetId].score += 5;
-          }
-        }
-      }
-      break;
-    }
-
     default:
       break;
   }
@@ -748,13 +686,20 @@ export function reduceGameAction(
 
 export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyncProps) {
   const normalizedCode = (roomCode || 'QUIZ').trim().toUpperCase();
+  const storageKey = `quizcast_v6_room_${normalizedCode}`;
 
   const [room, setRoom] = useState<GameRoom>(() => {
     try {
-      const saved = localStorage.getItem(`quizcast_room_${normalizedCode}`);
+      const saved = localStorage.getItem(storageKey);
       if (saved) {
         const parsed = JSON.parse(saved);
-        if (parsed && Array.isArray(parsed.questions) && parsed.questions.length > 0) {
+        // Reject legacy cached rooms that still have the spoiler title
+        if (
+          parsed &&
+          Array.isArray(parsed.questions) &&
+          parsed.questions.length > 0 &&
+          parsed.currentPackTitle !== 'The Secret Singalong Round'
+        ) {
           return {
             ...parsed,
             revision: parsed.revision || 1
@@ -777,12 +722,29 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
   roomRef.current = room;
 
   useEffect(() => {
+    let wakeLock: any = null;
+    const requestWakeLock = async () => {
+      if ('wakeLock' in navigator && document.visibilityState === 'visible') {
+        try {
+          wakeLock = await (navigator as any).wakeLock.request('screen');
+        } catch (e) {}
+      }
+    };
+    requestWakeLock();
+    document.addEventListener('visibilitychange', requestWakeLock);
+    return () => {
+      document.removeEventListener('visibilitychange', requestWakeLock);
+      if (wakeLock) wakeLock.release().catch(() => {});
+    };
+  }, []);
+
+  useEffect(() => {
     if (room) {
       try {
-        localStorage.setItem(`quizcast_room_${normalizedCode}`, JSON.stringify(room));
+        localStorage.setItem(storageKey, JSON.stringify(room));
       } catch (e) {}
     }
-  }, [room, normalizedCode]);
+  }, [room, storageKey]);
 
   const applyRoomState = useCallback((incoming: Partial<GameRoom>, force = false) => {
     if (!incoming) return;
@@ -836,17 +798,15 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
 
   const publishToNetwork = useCallback((msg: any, options?: { skipNtfy?: boolean }) => {
     const rawJson = JSON.stringify(msg);
-    const mqttTopic = `quizcast_mesh_v5_${normalizedCode}`;
-    const httpTopic = `quizcast_ntfy_v5_${normalizedCode.toLowerCase()}`;
+    const mqttTopic = `quizcast_mesh_v6_${normalizedCode}`;
+    const httpTopic = `quizcast_ntfy_v6_${normalizedCode.toLowerCase()}`;
 
-    // 1. MQTT Cloud Publish
     if (mqttClientRef.current && mqttClientRef.current.connected) {
       try {
         mqttClientRef.current.publish(mqttTopic, rawJson, { qos: 0 });
       } catch (e) {}
     }
 
-    // 2. HTTPS / SSE Relay via ntfy.sh (Port 443)
     if (!options?.skipNtfy && msg.type !== 'HEARTBEAT') {
       try {
         let ntfyBody = rawJson;
@@ -855,6 +815,18 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
           ntfyBody = JSON.stringify({
             ...msg,
             room: lightweightRoom
+          });
+        } else if (
+          msg.type === 'HOST_ACTION' &&
+          msg.action?.type === 'UPDATE_QUESTIONS' &&
+          rawJson.length > 3500
+        ) {
+          ntfyBody = JSON.stringify({
+            ...msg,
+            action: {
+              ...msg.action,
+              payload: { packTitle: msg.action.payload?.packTitle, questions: [] }
+            }
           });
         }
         fetch(`https://ntfy.sh/${httpTopic}`, {
@@ -866,42 +838,18 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
       } catch (e) {}
     }
 
-    // 3. BroadcastChannel (Same-device sync)
     if (broadcastChannelRef.current) {
       try {
         broadcastChannelRef.current.postMessage(msg);
       } catch (e) {}
     }
-
-    // 4. Optional Custom Backend REST API (only if VITE_BACKEND_URL is set)
-    const apiBase = getBackendHttpUrl();
-    if (apiBase && (msg.type === 'PLAYER_ACTION' || msg.type === 'HOST_ACTION' || msg.type === 'PLAYER_JOIN')) {
-      const actionPayload =
-        msg.type === 'PLAYER_JOIN'
-          ? { type: 'JOIN_ROOM', playerId: msg.playerId, playerName: msg.playerName, role: 'player' }
-          : msg.action;
-
-      if (actionPayload) {
-        try {
-          fetch(`${apiBase}/api/room/${normalizedCode}/action`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({
-              ...actionPayload,
-              roomCode: normalizedCode
-            })
-          }).catch(() => {});
-        } catch (e) {}
-      }
-    }
   }, [normalizedCode]);
 
   useEffect(() => {
     if (!role) return;
-
     let isCleanedUp = false;
-    const mqttTopic = `quizcast_mesh_v5_${normalizedCode}`;
-    const httpTopic = `quizcast_ntfy_v5_${normalizedCode.toLowerCase()}`;
+    const mqttTopic = `quizcast_mesh_v6_${normalizedCode}`;
+    const httpTopic = `quizcast_ntfy_v6_${normalizedCode.toLowerCase()}`;
     const pingStart = Date.now();
 
     const isDuplicate = (nonce?: string) => {
@@ -936,7 +884,6 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
               });
               applyRoomState(current, true);
             }
-
             if (data.type === 'PLAYER_JOIN' || (current.revision || 1) >= (data.revision || 1)) {
               publishToNetwork({
                 type: 'SYNC_ROOM',
@@ -950,12 +897,10 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
           }
           break;
         }
-
         case 'PLAYER_ACTION': {
           if (data.action) {
             const updated = reduceGameAction(roomRef.current, data.action);
             applyRoomState(updated, true);
-
             if (isAuthority) {
               publishToNetwork({
                 type: 'SYNC_ROOM',
@@ -969,7 +914,6 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
           }
           break;
         }
-
         case 'HOST_ACTION': {
           if (data.action) {
             const updated = reduceGameAction(roomRef.current, data.action);
@@ -977,7 +921,6 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
           }
           break;
         }
-
         case 'SYNC_ROOM': {
           if (data.room) {
             if (data.targetPlayerId && role === 'player' && data.targetPlayerId !== playerId) {
@@ -987,7 +930,6 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
           }
           break;
         }
-
         case 'HEARTBEAT': {
           const localRev = roomRef.current.revision || 1;
           if ((data.revision && data.revision > localRev) || (role === 'player' && roomRef.current.phase !== data.phase)) {
@@ -1002,35 +944,28 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
           }
           break;
         }
-
         default:
           break;
       }
     };
 
-    // 1. Setup Local BroadcastChannel
     try {
-      const bc = new BroadcastChannel(`quizcast_bc_v5_${normalizedCode}`);
+      const bc = new BroadcastChannel(`quizcast_bc_v6_${normalizedCode}`);
       broadcastChannelRef.current = bc;
       bc.onmessage = (event) => {
-        if (event.data) {
-          handleNetworkMessage(event.data);
-        }
+        if (event.data) handleNetworkMessage(event.data);
       };
     } catch (e) {}
 
-    // 2. Setup HTTPS / SSE Stream via ntfy.sh
     try {
       const es = new EventSource(`https://ntfy.sh/${httpTopic}/sse`);
       eventSourceRef.current = es;
-
       es.onopen = () => {
         if (!isCleanedUp) {
           setConnected(true);
           setLatencyMs(Math.max(1, Date.now() - pingStart));
         }
       };
-
       es.onmessage = (event) => {
         if (isCleanedUp || !event.data) return;
         try {
@@ -1043,7 +978,6 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
       };
     } catch (e) {}
 
-    // 3. Setup MQTT Cloud Mesh with automatic failover
     const mqttBrokers = [
       'wss://broker.emqx.io:8084/mqtt',
       'wss://broker.hivemq.com:8884/mqtt',
@@ -1083,7 +1017,6 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
           if (isCleanedUp) return;
           setConnected(true);
           setLatencyMs(Math.max(1, Date.now() - pingStart));
-
           client.subscribe(mqttTopic, { qos: 0 }, (err) => {
             if (!err && !isCleanedUp) {
               if (role === 'player') {
@@ -1131,13 +1064,10 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
         }
       }
     }
-
     connectMqtt();
 
-    // 4. Heartbeat timer (MQTT & BroadcastChannel only)
     const heartbeatTimer = setInterval(() => {
       if (isCleanedUp) return;
-
       if (role === 'tv' || role === 'host') {
         publishToNetwork(
           {
@@ -1164,13 +1094,6 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
           playerId,
           playerName: playerName || 'Player',
           nonce: `init_join_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
-        });
-      } else if (role === 'tv' || role === 'host') {
-        publishToNetwork({
-          type: 'REQUEST_ROOM_SYNC',
-          roomCode: normalizedCode,
-          revision: roomRef.current.revision || 1,
-          nonce: `init_req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
         });
       }
     }, 400);
@@ -1208,7 +1131,6 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
         role: role || undefined,
         payload
       };
-
       const actionId = `act_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
 
       const updated = reduceGameAction(roomRef.current, actionObj);
@@ -1242,228 +1164,34 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
     [normalizedCode, role, playerId, playerName, applyRoomState, publishToNetwork]
   );
 
-  // Authoritative 1s Timer Ticker for TV or Host
-  useEffect(() => {
-    if (role !== 'tv' && role !== 'host') return;
-    if (!room.timer?.running || room.phase !== 'QUESTION') return;
-
-    const interval = setInterval(() => {
-      sendAction('TIMER_TICK');
-    }, 1000);
-
-    return () => clearInterval(interval);
-  }, [role, room.timer?.running, room.phase, sendAction]);
-
-  const buzzIn = useCallback(
-    (options?: { doubleDown?: boolean }) => {
-      sendAction('BUZZ_IN', options);
-    },
-    [sendAction]
-  );
-
-  const submitAnswer = useCallback(
-    (answer: string, options?: { doubleDown?: boolean; pointHeist?: boolean }) => {
-      sendAction('SUBMIT_ANSWER', { answer, ...options });
-    },
-    [sendAction]
-  );
-
-  const setPhase = useCallback(
-    (phase: GamePhase, inputOpen?: boolean) => {
-      sendAction('SET_PHASE', { phase, inputOpen });
-    },
-    [sendAction]
-  );
-
-  const toggleLock = useCallback(
-    (open?: boolean) => {
-      sendAction('TOGGLE_LOCK', { open });
-    },
-    [sendAction]
-  );
-
-  const changeQuestion = useCallback(
-    (index: number) => {
-      sendAction('CHANGE_QUESTION', { index });
-    },
-    [sendAction]
-  );
-
-  const resetBuzzes = useCallback(() => {
-    sendAction('RESET_BUZZES');
-  }, [sendAction]);
-
-  const adjudicate = useCallback(
-    (targetPlayerId: string, status: 'correct' | 'wrong', points: number) => {
-      sendAction('ADJUDICATE', { playerId: targetPlayerId, status, points });
-    },
-    [sendAction]
-  );
-
-  const adjustScore = useCallback(
-    (targetPlayerId: string, delta: number) => {
-      sendAction('ADJUST_SCORE', { playerId: targetPlayerId, delta });
-    },
-    [sendAction]
-  );
-
-  const updateQuestions = useCallback(
-    (questions: Question[], packTitle?: string) => {
-      sendAction('UPDATE_QUESTIONS', { questions, packTitle });
-    },
-    [sendAction]
-  );
-
-  const addQuestion = useCallback(
-    (question: Partial<Question>, insertAt?: number) => {
-      sendAction('ADD_QUESTION', { question, insertAt });
-    },
-    [sendAction]
-  );
-
-  const editQuestion = useCallback(
-    (index: number, question: Partial<Question>) => {
-      sendAction('EDIT_QUESTION', { index, question });
-    },
-    [sendAction]
-  );
-
-  const deleteQuestion = useCallback(
-    (index: number) => {
-      sendAction('DELETE_QUESTION', { index });
-    },
-    [sendAction]
-  );
-
-  const triggerSound = useCallback(
-    (sound: string) => {
-      sendAction('TRIGGER_SOUND', { sound });
-    },
-    [sendAction]
-  );
-
-  const kickPlayer = useCallback(
-    (targetPlayerId: string) => {
-      sendAction('KICK_PLAYER', { playerId: targetPlayerId });
-    },
-    [sendAction]
-  );
-
-  const updatePlayerName = useCallback(
-    (newName: string) => {
-      sendAction('JOIN_ROOM', { name: newName });
-    },
-    [sendAction]
-  );
-
-  const startTimer = useCallback(
-    (durationSec?: number) => {
-      sendAction('START_TIMER', { durationSec });
-    },
-    [sendAction]
-  );
-
-  const pauseTimer = useCallback(() => {
-    sendAction('PAUSE_TIMER');
-  }, [sendAction]);
-
-  const resetTimer = useCallback(
-    (durationSec?: number) => {
-      sendAction('RESET_TIMER', { durationSec });
-    },
-    [sendAction]
-  );
-
-  const setTimerDuration = useCallback(
-    (durationSec: number) => {
-      sendAction('SET_TIMER_DURATION', { durationSec });
-    },
-    [sendAction]
-  );
-
-  const toggleAutoLock = useCallback(
-    (autoLock?: boolean) => {
-      sendAction('TOGGLE_AUTO_LOCK', { autoLock });
-    },
-    [sendAction]
-  );
-
-  const triggerSabotage = useCallback(
-    (targetPlayerId: string, type: 'ink' | 'frost' | 'scramble') => {
-      sendAction('TRIGGER_SABOTAGE', { targetPlayerId, type });
-    },
-    [sendAction]
-  );
-
-  const clearSabotage = useCallback(
-    (targetPlayerId?: string) => {
-      sendAction('CLEAR_SABOTAGE', { targetPlayerId });
-    },
-    [sendAction]
-  );
-
-  const revealNextClue = useCallback(() => {
-    sendAction('REVEAL_NEXT_CLUE');
-  }, [sendAction]);
-
-  const toggleBluffMode = useCallback(
-    (active?: boolean) => {
-      sendAction('TOGGLE_BLUFF_MODE', { active });
-    },
-    [sendAction]
-  );
-
-  const setBluffPhase = useCallback(
-    (phase: 'bluffing' | 'voting') => {
-      sendAction('SET_BLUFF_PHASE', { phase });
-    },
-    [sendAction]
-  );
-
-  const submitBluff = useCallback(
-    (text: string) => {
-      sendAction('SUBMIT_BLUFF', { text });
-    },
-    [sendAction]
-  );
-
-  const voteBluff = useCallback(
-    (targetPlayerId: string) => {
-      sendAction('VOTE_BLUFF', { targetPlayerId });
-    },
-    [sendAction]
-  );
-
   return {
     room,
     connected,
     latencyMs,
-    buzzIn,
-    submitAnswer,
-    setPhase,
-    toggleLock,
-    changeQuestion,
-    resetBuzzes,
-    adjudicate,
-    adjustScore,
-    updateQuestions,
-    addQuestion,
-    editQuestion,
-    deleteQuestion,
-    triggerSound,
-    kickPlayer,
-    updatePlayerName,
-    startTimer,
-    pauseTimer,
-    resetTimer,
-    setTimerDuration,
-    toggleAutoLock,
-    triggerSabotage,
-    clearSabotage,
-    revealNextClue,
-    toggleBluffMode,
-    setBluffPhase,
-    submitBluff,
-    voteBluff
+    buzzIn: useCallback(() => sendAction('BUZZ_IN'), [sendAction]),
+    submitAnswer: useCallback((answer: string) => sendAction('SUBMIT_ANSWER', { answer }), [sendAction]),
+    submitLie: useCallback((lie: string) => sendAction('SUBMIT_LIE', { lie }), [sendAction]),
+    startBluffVote: useCallback(() => sendAction('START_BLUFF_VOTE'), [sendAction]),
+    toggleDoubleDown: useCallback(() => sendAction('TOGGLE_DOUBLE_DOWN'), [sendAction]),
+    setConfidence: useCallback((level: ConfidenceLevel) => sendAction('SET_CONFIDENCE', { level }), [sendAction]),
+    setHeistTarget: useCallback((targetPlayerId: string) => sendAction('SET_HEIST_TARGET', { targetPlayerId }), [sendAction]),
+    toggleHeistMode: useCallback((active?: boolean) => sendAction('TOGGLE_HEIST_MODE', { active }), [sendAction]),
+    sabotagePlayer: useCallback((targetPlayerId: string, sabotageType: SabotageType) => sendAction('SABOTAGE_PLAYER', { targetPlayerId, sabotageType }), [sendAction]),
+    clearSabotage: useCallback(() => sendAction('CLEAR_SABOTAGE'), [sendAction]),
+    nextClue: useCallback(() => sendAction('NEXT_CLUE'), [sendAction]),
+    startTimer: useCallback((seconds = 20) => sendAction('START_TIMER', { seconds }), [sendAction]),
+    setPhase: useCallback((phase: GamePhase, inputOpen?: boolean) => sendAction('SET_PHASE', { phase, inputOpen }), [sendAction]),
+    toggleLock: useCallback((open?: boolean) => sendAction('TOGGLE_LOCK', { open }), [sendAction]),
+    changeQuestion: useCallback((index: number) => sendAction('CHANGE_QUESTION', { index }), [sendAction]),
+    resetBuzzes: useCallback(() => sendAction('RESET_BUZZES'), [sendAction]),
+    adjudicate: useCallback((targetPlayerId: string, status: 'correct' | 'wrong', points: number) => sendAction('ADJUDICATE', { playerId: targetPlayerId, status, points }), [sendAction]),
+    adjustScore: useCallback((targetPlayerId: string, delta: number) => sendAction('ADJUST_SCORE', { playerId: targetPlayerId, delta }), [sendAction]),
+    updateQuestions: useCallback((questions: Question[], packTitle?: string) => sendAction('UPDATE_QUESTIONS', { questions, packTitle }), [sendAction]),
+    addQuestion: useCallback((question: Partial<Question>, insertAt?: number) => sendAction('ADD_QUESTION', { question, insertAt }), [sendAction]),
+    editQuestion: useCallback((index: number, question: Partial<Question>) => sendAction('EDIT_QUESTION', { index, question }), [sendAction]),
+    deleteQuestion: useCallback((index: number) => sendAction('DELETE_QUESTION', { index }), [sendAction]),
+    triggerSound: useCallback((sound: string) => sendAction('TRIGGER_SOUND', { sound }), [sendAction]),
+    kickPlayer: useCallback((targetPlayerId: string) => sendAction('KICK_PLAYER', { playerId: targetPlayerId }), [sendAction]),
+    updatePlayerName: useCallback((newName: string) => sendAction('JOIN_ROOM', { name: newName }), [sendAction])
   };
 }

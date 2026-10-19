@@ -55,8 +55,11 @@ interface HostViewProps {
   onSetTimerDuration?: (durationSec: number) => void;
   onToggleAutoLock?: (autoLock?: boolean) => void;
   onRevealNextClue?: () => void;
+  onNextClue?: () => void;
   onToggleBluffMode?: (active?: boolean) => void;
   onSetBluffPhase?: (phase: 'bluffing' | 'voting') => void;
+  onStartBluffVote?: () => void;
+  onToggleHeistMode?: () => void;
 }
 
 export const HostView: React.FC<HostViewProps> = ({

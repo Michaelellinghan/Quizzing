@@ -1,4 +1,10 @@
-export type QuestionType = 'BUZZER' | 'MCQ' | 'TEXT' | 'NUMERIC' | 'BLUFF';
+export type GamePhase = 'LOBBY' | 'QUESTION' | 'REVEAL' | 'ROUND_STATS' | 'LEADERBOARD';
+
+export type QuestionType = 'BUZZER' | 'MCQ' | 'TEXT' | 'NUMERIC' | 'NUMBER' | 'BLUFF' | 'CLUES';
+
+export type ConfidenceLevel = 'SAFE' | 'NORMAL' | 'ALL_IN';
+
+export type SabotageType = 'ICE' | 'DRUNK' | 'MIRROR' | 'INK' | 'FREEZE' | 'SCRAMBLE';
 
 export interface Question {
   id: string;
@@ -6,14 +12,14 @@ export interface Question {
   category: string;
   question: string;
   options?: string[];
+  clues?: string[];
+  progressiveClues?: string[];
   answer: string;
   points: number;
   mediaType?: 'image' | 'audio' | 'video' | 'none';
   mediaUrl?: string;
   explanation?: string;
   hint?: string;
-  progressiveClues?: string[];
-  activeClueIndex?: number;
 }
 
 export interface Player {
@@ -21,17 +27,30 @@ export interface Player {
   name: string;
   score: number;
   streak: number;
+  maxStreakLost?: number;
+  totalAnswerMs?: number;
+  answerCount?: number;
+  wagerNet?: number;
   connected: boolean;
   avatar?: string;
   lastBuzzTime?: number;
   lastSeen?: number;
+  doubleDownUsed?: boolean;
+  doubleDownActive?: boolean;
   doubleDownTokens?: number;
   sabotageTokens?: number;
   pointHeistAvailable?: boolean;
-  activeSabotage?: {
-    type: 'ink' | 'frost' | 'scramble';
+  confidence?: ConfidenceLevel;
+  heistTargetId?: string;
+  sabotageEffect?: {
+    type: SabotageType;
     fromName: string;
-    expiresAt: number;
+    nonce: number;
+  } | null;
+  activeSabotage?: {
+    type: 'INK' | 'FREEZE' | 'SCRAMBLE';
+    fromName: string;
+    until: number;
   } | null;
 }
 
@@ -42,6 +61,7 @@ export interface Buzz {
   elapsedMs: number;
   serverOrder: number;
   doubleDown?: boolean;
+  doubledDown?: boolean;
 }
 
 export interface Submission {
@@ -52,34 +72,15 @@ export interface Submission {
   elapsedMs: number;
   status: 'pending' | 'correct' | 'wrong';
   pointsAwarded?: number;
-  doubleDown?: boolean;
-  pointHeist?: boolean;
+  speedBonus?: number;
   speedBonusAwarded?: number;
-  bluff?: string;
-  votedForPlayerId?: string;
-}
-
-export type GamePhase = 'LOBBY' | 'QUESTION' | 'REVEAL' | 'ROUND_STATS' | 'LEADERBOARD';
-
-export interface QuestionStat {
-  correctCount: number;
-  totalAttempts: number;
-  buzzTimes: number[];
-}
-
-export interface RoomTimer {
-  durationSec: number;
-  remainingSec: number;
-  running: boolean;
-  autoLock: boolean;
-  endsAt: number;
-}
-
-export interface BluffEntry {
-  playerId: string;
-  playerName: string;
-  text: string;
-  votes: string[]; // playerIds that voted for this
+  doubleDown?: boolean;
+  doubledDown?: boolean;
+  pointHeist?: boolean;
+  confidence?: ConfidenceLevel;
+  heistStolen?: number;
+  fooledCount?: number;
+  isBluff?: boolean;
 }
 
 export interface GameRoom {
@@ -88,45 +89,59 @@ export interface GameRoom {
   currentQIndex: number;
   inputOpen: boolean;
   questionStartTime: number;
+  timerSeconds?: number;
+  timer?: {
+    durationSec: number;
+    remainingSec: number;
+    running: boolean;
+    autoLock?: boolean;
+  };
+  clueStep?: number;
+  progressiveClueIndex?: number;
+  heistActive?: boolean;
+  lastHeistEvent?: {
+    fromId: string;
+    fromName: string;
+    toId: string;
+    toName: string;
+    points: number;
+    timestamp: number;
+  };
+  activeSabotages?: Record<
+    string,
+    {
+      type: 'INK' | 'FREEZE' | 'SCRAMBLE';
+      fromName: string;
+      until: number;
+    }
+  >;
+  superlatives?: {
+    title: string;
+    award?: string;
+    recipient: string;
+    recipientName?: string;
+    stat: string;
+    detail?: string;
+    icon: string;
+  }[];
+  bluffMode?: boolean;
+  bluffPhase?: 'bluffing' | 'voting';
+  bluffStage?: 'ENTER_LIES' | 'VOTE' | 'COLLECTING' | 'VOTING' | 'REVEAL';
+  bluffLies?: Record<string, string>;
+  bluffs?: Record<string, string>;
+  bluffOptions?: string[];
+  bluffVotes?: Record<string, string>;
   questions: Question[];
   currentPackTitle: string;
   players: Record<string, Player>;
   buzzes: Buzz[];
   submissions: Record<string, Submission>;
-  questionHistory: Record<string, QuestionStat>;
+  questionHistory: Record<string, { correctCount: number; totalAttempts: number; buzzTimes: number[] }>;
   soundTrigger?: { sound: string; nonce: number };
   lastUpdated: number;
   revision?: number;
   hostLastSeen?: number;
   hostConnected?: boolean;
-  // Interactive Mechanics
-  timer?: RoomTimer;
-  progressiveClueIndex?: number;
-  bluffMode?: {
-    active: boolean;
-    phase: 'bluffing' | 'voting';
-    bluffs: Record<string, BluffEntry>;
-  };
-  activeSabotages?: Record<
-    string,
-    {
-      type: 'ink' | 'frost' | 'scramble';
-      fromName: string;
-      expiresAt: number;
-    }
-  >;
-  lastHeistEvent?: {
-    fromName: string;
-    toName: string;
-    points: number;
-    timestamp: number;
-  } | null;
-  superlatives?: {
-    award: string;
-    icon: string;
-    recipientName: string;
-    detail: string;
-  }[];
 }
 
 export interface QuizPack {

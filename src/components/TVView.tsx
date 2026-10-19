@@ -756,9 +756,15 @@ export const TVView: React.FC<TVViewProps> = ({
                       >
                         <span className="text-xl">{sup.icon}</span>
                         <div className="min-w-0 flex-1">
-                          <div className="text-[10px] font-black uppercase text-amber-400 truncate">{sup.award}</div>
-                          <div className="text-xs font-bold text-white truncate">{sup.recipientName}</div>
-                          <div className="text-[9px] text-slate-400 truncate">{sup.detail}</div>
+                          <div className="text-[10px] font-black uppercase text-amber-400 truncate">
+                            {sup.award || sup.title}
+                          </div>
+                          <div className="text-xs font-bold text-white truncate">
+                            {sup.recipientName || sup.recipient}
+                          </div>
+                          <div className="text-[9px] text-slate-400 truncate">
+                            {sup.detail || sup.stat}
+                          </div>
                         </div>
                       </div>
                     ))}
