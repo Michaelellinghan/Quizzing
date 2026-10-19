@@ -120,7 +120,7 @@ function getOrCreateRoom(code: string): GameRoom {
       inputOpen: true, // Keep inputs open for active questions
       questionStartTime: Date.now(),
       questions: defaultPack ? [...defaultPack.questions] : [],
-      currentPackTitle: defaultPack ? defaultPack.title : 'The Secret Singalong Round',
+      currentPackTitle: defaultPack ? defaultPack.title : 'General Knowledge: Round 1',
       players: {},
       buzzes: [],
       submissions: {},
@@ -155,6 +155,15 @@ function broadcastToRoom(roomCode: string, actionType: string, payload?: any) {
   }
 }
 
+function cleanAnswerString(str: string): string {
+  return String(str || '')
+    .toLowerCase()
+    .replace(/^(the|a|an|king|sir|lord)\s+/i, '')
+    .replace(/[.,\/#!$%\^&\*;:{}=\-_`~()"'’]/g, '')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 // ---------------- GAME ACTION PROCESSING (Shared by WebSocket & REST API) ----------------
 export function processRoomAction(action: {
   type: string;
@@ -173,7 +182,7 @@ export function processRoomAction(action: {
     switch (type) {
     case 'JOIN_ROOM': {
       if (role === 'player' && playerId) {
-        const cleanName = (playerName || 'Player').trim();
+        const cleanName = (payload?.name || playerName || 'Player').trim();
         if (!room.players[playerId]) {
           room.players[playerId] = {
             id: playerId,
@@ -181,10 +190,12 @@ export function processRoomAction(action: {
             score: 0,
             streak: 0,
             connected: true,
-            avatar: `avatar-${(Object.keys(room.players).length % 8) + 1}`
+            avatar: `avatar-${(Object.keys(room.players).length % 8) + 1}`,
+            lastSeen: now
           };
         } else {
           room.players[playerId].connected = true;
+          room.players[playerId].lastSeen = now;
           if (cleanName && cleanName !== 'Player') {
             room.players[playerId].name = cleanName;
           }
@@ -196,8 +207,7 @@ export function processRoomAction(action: {
     }
 
         case 'BUZZ_IN': {
-          if (!room.inputOpen) return room;
-          if (!playerId) return room;
+          if (!playerId || !room.inputOpen || room.phase !== 'QUESTION') return room;
 
           // Check if already buzzed for this question
           const alreadyBuzzed = room.buzzes.some(b => b.playerId === playerId);
@@ -231,21 +241,24 @@ export function processRoomAction(action: {
         }
 
         case 'SUBMIT_ANSWER': {
-          if (!playerId) return room;
+          if (!playerId || !room.inputOpen || room.phase !== 'QUESTION') return room;
           const answer = String(payload?.answer || '').trim();
           if (!answer) return room;
 
           const elapsed = room.questionStartTime > 0 ? now - room.questionStartTime : 0;
           const currentQ = room.questions[room.currentQIndex];
-
-          const cleanSubmitted = answer.toLowerCase().replace(/^(the|a|an)\s+/i, '').replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '').trim();
-          const cleanOfficial = (currentQ?.answer || '').toLowerCase().replace(/^(the|a|an)\s+/i, '').replace(/[.,\/#!$%\^&\*;:{}=\-_`~()]/g, '').trim();
+          const cleanSubmitted = cleanAnswerString(answer);
+          const rawOfficial = String(currentQ?.answer || '');
+          const acceptableAnswers = rawOfficial
+            .split(/\s*\/\s*/)
+            .map((part) => cleanAnswerString(part))
+            .filter(Boolean);
 
           let autoStatus: 'pending' | 'correct' | 'wrong' = 'pending';
-          if (currentQ?.type === 'MCQ' && cleanOfficial) {
-            autoStatus = cleanSubmitted === cleanOfficial ? 'correct' : 'wrong';
-          } else if (cleanOfficial) {
-            if (cleanSubmitted === cleanOfficial || (cleanSubmitted.length >= 3 && (cleanOfficial.includes(cleanSubmitted) || cleanSubmitted.includes(cleanOfficial)))) {
+          if (currentQ?.type === 'MCQ' && acceptableAnswers.length > 0) {
+            autoStatus = acceptableAnswers.includes(cleanSubmitted) ? 'correct' : 'wrong';
+          } else if (acceptableAnswers.length > 0) {
+            if (acceptableAnswers.includes(cleanSubmitted)) {
               autoStatus = 'correct';
             } else {
               autoStatus = 'pending';
@@ -255,7 +268,10 @@ export function processRoomAction(action: {
           // If previously awarded points, revert before re-evaluating
           const prevSub = room.submissions[playerId];
           if (prevSub && prevSub.status === 'correct' && room.players[playerId]) {
-            room.players[playerId].score -= (prevSub.pointsAwarded || currentQ?.points || 10);
+            room.players[playerId].score = Math.max(
+              0,
+              room.players[playerId].score - (prevSub.pointsAwarded || currentQ?.points || 10)
+            );
           }
 
           const pointsAwarded = autoStatus === 'correct' ? (currentQ?.points || 10) : 0;
@@ -370,23 +386,32 @@ export function processRoomAction(action: {
 
         case 'ADJUDICATE': {
           const targetPlayerId = payload?.playerId;
-          const status = payload?.status; // 'correct' | 'wrong'
-          const points = Number(payload?.points || 0);
+          const status = payload?.status as 'correct' | 'wrong';
+          const points = Number(payload?.points || 10);
 
           if (targetPlayerId && room.players[targetPlayerId]) {
+            const prevSub = room.submissions[targetPlayerId];
+            const alreadyAwarded = prevSub?.status === 'correct' ? (prevSub.pointsAwarded ?? points) : 0;
+
             if (status === 'correct') {
-              room.players[targetPlayerId].score += points;
-              room.players[targetPlayerId].streak += 1;
+              const delta = Math.max(0, points - alreadyAwarded);
+              room.players[targetPlayerId].score += delta;
+              if (prevSub?.status !== 'correct') {
+                room.players[targetPlayerId].streak += 1;
+              }
               room.soundTrigger = { sound: 'correct', nonce: Math.random() };
             } else if (status === 'wrong') {
-              room.players[targetPlayerId].score = Math.max(0, room.players[targetPlayerId].score - Math.abs(points));
+              room.players[targetPlayerId].score = Math.max(0, room.players[targetPlayerId].score - alreadyAwarded);
               room.players[targetPlayerId].streak = 0;
               room.soundTrigger = { sound: 'wrong', nonce: Math.random() };
             }
 
-            if (room.submissions[targetPlayerId]) {
-              room.submissions[targetPlayerId].status = status;
-              room.submissions[targetPlayerId].pointsAwarded = status === 'correct' ? points : 0;
+            if (prevSub) {
+              room.submissions[targetPlayerId] = {
+                ...prevSub,
+                status,
+                pointsAwarded: status === 'correct' ? points : 0
+              };
             }
 
             const currentQ = room.questions[room.currentQIndex];

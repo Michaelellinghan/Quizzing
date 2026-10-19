@@ -74,7 +74,7 @@ export interface QuizPack {
   id: string;
   title: string;
   description: string;
-  category: string;
+  category?: string;
   icon?: string;
   questions: Question[];
 }

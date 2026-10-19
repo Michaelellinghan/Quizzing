@@ -5,17 +5,14 @@
 
 import React, { useState, useEffect } from 'react';
 import { useQuizSync } from './services/quizSync';
-import { Header } from './components/Header';
 import { TVView } from './components/TVView';
 import { HostView } from './components/HostView';
 import { PlayerView } from './components/PlayerView';
 import { RoleSelectModal } from './components/RoleSelectModal';
 import { AIChatModal } from './components/AIChatModal';
 import { QuizStudioModal } from './components/QuizStudioModal';
-import { Loader2 } from 'lucide-react';
 
 export default function App() {
-  // Parse URL query params if present (e.g. ?room=QUIZ&role=player)
   const queryParams = new URLSearchParams(window.location.search);
   const urlRoom = queryParams.get('room');
   const urlRole = queryParams.get('role') as 'tv' | 'host' | 'player' | null;
@@ -24,9 +21,13 @@ export default function App() {
     return (urlRoom || localStorage.getItem('quizcast_room') || 'QUIZ').trim().toUpperCase();
   });
 
+  // If a user scans a QR code (?room=XXXX), default them to 'player' and lock them there
   const [role, setRole] = useState<'tv' | 'host' | 'player' | null>(() => {
     if (urlRole && ['tv', 'host', 'player'].includes(urlRole)) {
       return urlRole;
+    }
+    if (urlRoom) {
+      return 'player';
     }
     const saved = localStorage.getItem('quizcast_role');
     return (saved as any) || null;
@@ -48,7 +49,24 @@ export default function App() {
   const [isAIChatOpen, setIsAIChatOpen] = useState<boolean>(false);
   const [isQuizStudioOpen, setIsQuizStudioOpen] = useState<boolean>(false);
 
-  // Sync with server / socket
+  // Screen Wake Lock so phones don't sleep during a game
+  useEffect(() => {
+    let wakeLock: any = null;
+    const requestWakeLock = async () => {
+      if ('wakeLock' in navigator && document.visibilityState === 'visible') {
+        try {
+          wakeLock = await (navigator as any).wakeLock.request('screen');
+        } catch (e) {}
+      }
+    };
+    requestWakeLock();
+    document.addEventListener('visibilitychange', requestWakeLock);
+    return () => {
+      document.removeEventListener('visibilitychange', requestWakeLock);
+      if (wakeLock) wakeLock.release().catch(() => {});
+    };
+  }, []);
+
   const {
     room,
     connected,
@@ -75,7 +93,6 @@ export default function App() {
     playerName
   });
 
-  // Handle launching role from modal
   const handleLaunchRole = (
     selectedRole: 'tv' | 'host' | 'player',
     newRoomCode: string,
@@ -87,12 +104,11 @@ export default function App() {
     localStorage.setItem('quizcast_room', cleanCode);
     localStorage.setItem('quizcast_role', selectedRole);
 
-    if (newPlayerName) {
+    if (newPlayerName !== undefined) {
       setPlayerName(newPlayerName);
       localStorage.setItem('quizcast_player_name', newPlayerName);
     }
 
-    // Update URL query params without reloading
     const newUrl = new URL(window.location.href);
     newUrl.searchParams.set('room', cleanCode);
     newUrl.searchParams.set('role', selectedRole);
@@ -100,6 +116,8 @@ export default function App() {
   };
 
   const handleSwitchRole = () => {
+    // Players are not permitted to switch roles to Host or TV
+    if (role === 'player') return;
     setRole(null);
     localStorage.removeItem('quizcast_role');
     const newUrl = new URL(window.location.href);
@@ -109,10 +127,10 @@ export default function App() {
 
   const activeQ = room?.questions[room.currentQIndex];
 
-  // Dedicated TV Spectator 16:9 Viewport (Strictly zero-scroll and full 16:9 frame)
+  // 1. TV Display
   if (role === 'tv') {
     return (
-      <div id="tv-viewport-container" className="h-screen w-screen max-h-screen max-w-screen overflow-hidden bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
+      <div id="tv-viewport-container" className="h-[100dvh] w-screen overflow-hidden bg-[#120924] text-white flex flex-col select-none">
         <TVView
           room={room}
           onSwitchRole={handleSwitchRole}
@@ -120,73 +138,64 @@ export default function App() {
           connected={connected}
           latencyMs={latencyMs}
         />
-        <AIChatModal
-          isOpen={isAIChatOpen}
-          onClose={() => setIsAIChatOpen(false)}
-          currentQuestion={activeQ?.question}
-          currentAnswer={activeQ?.answer}
+      </div>
+    );
+  }
+
+  // 2. Player Handset (Locked to Player mode — no Header, no role switcher, no scrolling)
+  if (role === 'player') {
+    return (
+      <div className="h-[100dvh] w-screen overflow-hidden bg-[#120924] text-white flex flex-col select-none">
+        <PlayerView
+          room={room}
+          playerId={playerId}
+          playerName={playerName}
+          onBuzzIn={buzzIn}
+          onSubmitAnswer={submitAnswer}
+          latencyMs={latencyMs}
+          onUpdatePlayerName={(newName: string) => {
+            const trimmed = newName.trim();
+            setPlayerName(trimmed);
+            localStorage.setItem('quizcast_player_name', trimmed);
+            updatePlayerName(trimmed);
+          }}
         />
       </div>
     );
   }
 
+  // 3. Host Controller or Initial Role Selection
   return (
-    <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans">
-      {/* Top Bar Navigation */}
-      <Header
-        roomCode={roomCode}
-        role={role}
-        onSwitchRole={handleSwitchRole}
-        onOpenAIChat={() => setIsAIChatOpen(true)}
-        onOpenQuizStudio={() => setIsQuizStudioOpen(true)}
-        connected={connected}
-        latencyMs={latencyMs}
-      />
-
-      {/* Main Content Area */}
-      <main className="flex-1 flex flex-col items-center justify-center">
-        {!role ? (
+    <div className="h-[100dvh] w-screen overflow-hidden bg-[#120924] text-white flex flex-col">
+      {!role ? (
+        <div className="flex-1 overflow-y-auto flex items-center justify-center p-4">
           <RoleSelectModal
             initialRoomCode={roomCode}
             onLaunchRole={handleLaunchRole}
             onOpenQuizStudio={() => setIsQuizStudioOpen(true)}
           />
-        ) : role === 'host' ? (
-          <HostView
-            room={room}
-            onSetPhase={setPhase}
-            onToggleLock={toggleLock}
-            onChangeQuestion={changeQuestion}
-            onResetBuzzes={resetBuzzes}
-            onAdjudicate={adjudicate}
-            onAdjustScore={adjustScore}
-            onUpdateQuestions={updateQuestions}
-            onAddQuestion={addQuestion}
-            onEditQuestion={editQuestion}
-            onDeleteQuestion={deleteQuestion}
-            onTriggerSound={triggerSound}
-            onKickPlayer={kickPlayer}
-            onOpenAIChat={() => setIsAIChatOpen(true)}
-            onOpenQuizStudio={() => setIsQuizStudioOpen(true)}
-          />
-        ) : (
-          <PlayerView
-            room={room}
-            playerId={playerId}
-            playerName={playerName || 'Player'}
-            onBuzzIn={buzzIn}
-            onSubmitAnswer={submitAnswer}
-            latencyMs={latencyMs}
-            onUpdatePlayerName={(newName: string) => {
-              setPlayerName(newName);
-              localStorage.setItem('quizcast_player_name', newName);
-              updatePlayerName(newName);
-            }}
-          />
-        )}
-      </main>
+        </div>
+      ) : (
+        <HostView
+          room={room}
+          onSetPhase={setPhase}
+          onToggleLock={toggleLock}
+          onChangeQuestion={changeQuestion}
+          onResetBuzzes={resetBuzzes}
+          onAdjudicate={adjudicate}
+          onAdjustScore={adjustScore}
+          onUpdateQuestions={updateQuestions}
+          onAddQuestion={addQuestion}
+          onEditQuestion={editQuestion}
+          onDeleteQuestion={deleteQuestion}
+          onTriggerSound={triggerSound}
+          onKickPlayer={kickPlayer}
+          onOpenAIChat={() => setIsAIChatOpen(true)}
+          onOpenQuizStudio={() => setIsQuizStudioOpen(true)}
+          onSwitchRole={handleSwitchRole}
+        />
+      )}
 
-      {/* Gemini AI Chatbot Modal */}
       <AIChatModal
         isOpen={isAIChatOpen}
         onClose={() => setIsAIChatOpen(false)}
@@ -194,7 +203,6 @@ export default function App() {
         currentAnswer={activeQ?.answer}
       />
 
-      {/* Custom Quiz & Question Writer Studio */}
       <QuizStudioModal
         isOpen={isQuizStudioOpen}
         onClose={() => setIsQuizStudioOpen(false)}

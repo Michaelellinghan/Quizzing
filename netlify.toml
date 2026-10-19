@@ -2,13 +2,6 @@
   publish = "dist"
   command = "npm run build"
 
-# Proxy API calls directly to the Cloud Run backend over HTTPS (Port 443)
-[[redirects]]
-  from = "/api/*"
-  to = "https://ais-pre-gn2ihvmb443kj3zt3zzttc-148054449091.europe-west2.run.app/api/:splat"
-  status = 200
-  force = true
-
 # Single Page App routing fallback so direct room URLs work seamlessly on mobile
 [[redirects]]
   from = "/*"

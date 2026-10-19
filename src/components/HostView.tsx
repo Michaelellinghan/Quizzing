@@ -42,6 +42,7 @@ interface HostViewProps {
   onKickPlayer: (playerId: string) => void;
   onOpenAIChat: () => void;
   onOpenQuizStudio?: () => void;
+  onSwitchRole?: () => void;
 }
 
 export const HostView: React.FC<HostViewProps> = ({
@@ -59,7 +60,8 @@ export const HostView: React.FC<HostViewProps> = ({
   onTriggerSound,
   onKickPlayer,
   onOpenAIChat,
-  onOpenQuizStudio
+  onOpenQuizStudio,
+  onSwitchRole
 }) => {
   const [showPackModal, setShowPackModal] = useState<boolean>(false);
   const [showAddQuestionModal, setShowAddQuestionModal] = useState<boolean>(false);

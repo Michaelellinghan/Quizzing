@@ -1,171 +1,172 @@
-import { QuizPack } from '../types/quiz';
+import { Question } from '../types/quiz';
+
+export interface QuizPack {
+  id: string;
+  title: string;
+  description: string;
+  category?: string;
+  questions: Question[];
+}
 
 export const DEFAULT_QUIZ_PACKS: QuizPack[] = [
   {
-    id: 'secret-singalong',
-    title: 'The Secret Singalong Round',
-    description: '13 "General Knowledge" questions. The first syllable of every answer reveals a legendary Beatles singalong ("Na, na na na... Hey Jude!")',
-    category: 'Music & Wordplay',
+    id: 'pack-gk-1',
+    title: 'General Knowledge: Round 1',
+    description: '13 general knowledge questions with a 5-point bonus connection at the end.',
     questions: [
       {
-        id: 'singalong-1',
+        id: 'sing_1',
         type: 'TEXT',
-        category: 'Food & Drink',
+        category: 'General Knowledge',
         question: 'What popular Tex-Mex snack consists of heated tortilla chips covered in melted cheese and jalapeños?',
         answer: 'Nachos',
-        points: 10,
-        explanation: 'Starts with "NA-" (1st syllable)'
+        points: 10
       },
       {
-        id: 'singalong-2',
+        id: 'sing_2',
         type: 'TEXT',
-        category: 'Acronyms',
+        category: 'General Knowledge',
         question: 'In the acronym NHS, what does the letter N stand for?',
         answer: 'National',
-        points: 10,
-        explanation: 'Starts with "NA-" (2nd syllable)'
+        points: 10
       },
       {
-        id: 'singalong-3',
+        id: 'sing_3',
         type: 'TEXT',
-        category: 'Geography',
+        category: 'General Knowledge',
         question: 'What is the Italian city widely considered to be the historical birthplace of pizza?',
         answer: 'Naples',
-        points: 10,
-        explanation: 'Starts with "NA-" (3rd syllable)'
+        points: 10
       },
       {
-        id: 'singalong-4',
+        id: 'sing_4',
         type: 'TEXT',
-        category: 'Celebrity',
+        category: 'General Knowledge',
         question: 'What is the first name of the iconic British supermodel whose surname is Campbell?',
         answer: 'Naomi',
-        points: 10,
-        explanation: 'Starts with "NA-" (4th syllable)'
+        points: 10
       },
       {
-        id: 'singalong-5',
+        id: 'sing_5',
         type: 'TEXT',
-        category: 'History',
+        category: 'General Knowledge',
         question: 'Who was the French military leader famously defeated at the Battle of Waterloo in 1815?',
         answer: 'Napoleon',
-        points: 10,
-        explanation: 'Starts with "NA-" (5th syllable)'
+        points: 10
       },
       {
-        id: 'singalong-6',
+        id: 'sing_6',
         type: 'TEXT',
-        category: 'Pop Culture',
+        category: 'General Knowledge',
         question: 'In the Marvel Cinematic Universe, what is the real first name of the superhero Black Widow?',
         answer: 'Natasha',
-        points: 10,
-        explanation: 'Starts with "NA-" (6th syllable)'
+        points: 10
       },
       {
-        id: 'singalong-7',
+        id: 'sing_7',
         type: 'TEXT',
-        category: 'Literature',
+        category: 'General Knowledge',
         question: 'What is the name of the magical fantasy world accessed through a wardrobe in the classic C.S. Lewis books?',
         answer: 'Narnia',
-        points: 10,
-        explanation: 'Starts with "NA-" (7th syllable)'
+        points: 10
       },
       {
-        id: 'singalong-8',
+        id: 'sing_8',
         type: 'TEXT',
-        category: 'Music',
+        category: 'General Knowledge',
         question: 'In music, what word is used to describe a note that is neither sharp nor flat?',
         answer: 'Natural',
-        points: 10,
-        explanation: 'Starts with "NA-" (8th syllable)'
+        points: 10
       },
       {
-        id: 'singalong-9',
+        id: 'sing_9',
         type: 'TEXT',
-        category: 'Vocabulary',
-        question: 'What four-letter word can refer to a country\'s fleet of military ships, or a very dark shade of blue?',
+        category: 'General Knowledge',
+        question: "What four-letter word can refer to a country's fleet of military ships, or a very dark shade of blue?",
         answer: 'Navy',
-        points: 10,
-        explanation: 'Starts with "NA-" (9th syllable)'
+        points: 10
       },
       {
-        id: 'singalong-10',
+        id: 'sing_10',
         type: 'TEXT',
-        category: 'Sport',
+        category: 'General Knowledge',
         question: 'What is the surname of the female tennis legend who won a record nine Wimbledon singles titles?',
         answer: 'Navratilova',
-        points: 10,
-        explanation: 'Starts with "NA-" (10th syllable)'
+        points: 10
       },
       {
-        id: 'singalong-11',
+        id: 'sing_11',
         type: 'TEXT',
-        category: 'Space & Science',
-        question: 'Which independent US government agency is responsible for the civilian space program?',
+        category: 'General Knowledge',
+        question: 'Which independent US government agency is responsible for the civilian space programme?',
         answer: 'NASA',
-        points: 10,
-        explanation: 'Starts with "NA-" (11th syllable)'
+        points: 10
       },
       {
-        id: 'singalong-12',
+        id: 'sing_12',
         type: 'TEXT',
-        category: 'Vocabulary',
-        question: 'What six-letter word refers to the period of a person\'s or thing\'s greatest success, popularity, or prime?',
+        category: 'General Knowledge',
+        question: "What six-letter word refers to the period of a person's or thing's greatest success, popularity, or prime?",
         answer: 'Heyday',
-        points: 10,
-        explanation: 'Starts with "HEY-" (12th syllable)'
+        points: 10
       },
       {
-        id: 'singalong-13',
+        id: 'sing_13',
         type: 'TEXT',
-        category: 'Film & Actors',
-        question: 'What is the first name of the British actor who plays Iris\'s brother Graham in the beloved Christmas movie The Holiday?',
-        answer: 'Jude (Law)',
-        points: 15,
-        explanation: 'Grand Reveal: Put the first syllables together: "Na, na na na na na na, na na na na, Hey Jude!"'
+        category: 'General Knowledge',
+        question: "What is the first name of the British actor who plays Iris's brother Graham in the Christmas film The Holiday?",
+        answer: 'Jude / Jude Law',
+        points: 10
+      },
+      {
+        id: 'sing_14',
+        type: 'TEXT',
+        category: 'Bonus Connection',
+        question: 'BONUS (5 Pts): Look closely at the start of your 13 answers in order. What hidden musical connection links them?',
+        answer: 'Hey Jude / The Beatles',
+        points: 5,
+        explanation: 'Read the first syllable of all 13 answers in order: "Na, na na na na na na, na na na na, Hey Jude!" (Nachos, National, Naples, Naomi, Napoleon, Natasha, Narnia, Natural, Navy, Navratilova, NASA, Heyday, Jude).'
       }
     ]
   },
   {
-    id: 'who-said-it',
-    title: 'Who Said It: Gemma Collins, Miss Piggy, or Donald Trump?',
-    description: 'Supreme narcissism, diva demands, and baffling boasts. Can teams tell the difference between the reality star, the Muppet, and the politician?',
-    category: 'Comedy Quotes',
+    id: 'pack-who-said-it',
+    title: 'Who Said It: Gemma, Piggy, or Trump?',
+    description: 'Was the quote spoken by Gemma Collins, Miss Piggy, or Donald Trump?',
     questions: [
       {
-        id: 'wsi-1',
+        id: 'q_quote_1',
         type: 'MCQ',
-        category: 'Quotes',
+        category: 'Who Said It?',
         question: '"Part of the beauty of me is that I am very rich."',
         options: ['Gemma Collins', 'Miss Piggy', 'Donald Trump'],
         answer: 'Donald Trump',
         points: 10,
-        explanation: 'Donald Trump said this during a 2011 Good Morning America interview!'
+        explanation: 'Said during a 2011 Good Morning America interview... though it sounds just like Miss Piggy!'
       },
       {
-        id: 'wsi-2',
+        id: 'q_quote_2',
         type: 'MCQ',
-        category: 'Quotes',
+        category: 'Who Said It?',
         question: '"I’ve got a very, very, very high IQ. I’m basically a genius."',
         options: ['Gemma Collins', 'Miss Piggy', 'Donald Trump'],
         answer: 'Gemma Collins',
         points: 10,
-        explanation: 'Gemma Collins famously boasted this during Celebrity Big Brother.'
+        explanation: 'Said during her stint on Celebrity Big Brother.'
       },
       {
-        id: 'wsi-3',
+        id: 'q_quote_3',
         type: 'MCQ',
-        category: 'Quotes',
+        category: 'Who Said It?',
         question: '"I don\'t care what you think of me, unless you think I\'m absolutely wonderful."',
         options: ['Gemma Collins', 'Miss Piggy', 'Donald Trump'],
         answer: 'Miss Piggy',
-        points: 10,
-        explanation: 'Classic quote from the glamorous Muppet diva herself.'
+        points: 10
       },
       {
-        id: 'wsi-4',
+        id: 'q_quote_4',
         type: 'MCQ',
-        category: 'Quotes',
+        category: 'Who Said It?',
         question: '"I think I am actually humble. I think I\'m much more humble than you would understand."',
         options: ['Gemma Collins', 'Miss Piggy', 'Donald Trump'],
         answer: 'Donald Trump',
@@ -173,515 +174,381 @@ export const DEFAULT_QUIZ_PACKS: QuizPack[] = [
         explanation: 'A genuine quote from a 2016 interview on 60 Minutes.'
       },
       {
-        id: 'wsi-5',
+        id: 'q_quote_5',
         type: 'MCQ',
-        category: 'Quotes',
+        category: 'Who Said It?',
         question: '"I am a massive fan of the dictionary."',
         options: ['Gemma Collins', 'Miss Piggy', 'Donald Trump'],
         answer: 'Gemma Collins',
         points: 10,
-        explanation: 'Another classic, baffling GC reality TV quote.'
+        explanation: 'Another classic GC quote from reality TV.'
       },
       {
-        id: 'wsi-6',
+        id: 'q_quote_6',
         type: 'MCQ',
-        category: 'Quotes',
+        category: 'Who Said It?',
         question: '"Expressing your feelings is good. Especially if they\'re feelings of absolute adoration for me."',
         options: ['Gemma Collins', 'Miss Piggy', 'Donald Trump'],
         answer: 'Miss Piggy',
-        points: 10,
-        explanation: 'Miss Piggy giving relationship advice.'
+        points: 10
       },
       {
-        id: 'wsi-7',
+        id: 'q_quote_7',
         type: 'MCQ',
-        category: 'Quotes',
+        category: 'Who Said It?',
         question: '"I have never seen a thin person drinking Diet Coke."',
         options: ['Gemma Collins', 'Miss Piggy', 'Donald Trump'],
         answer: 'Donald Trump',
         points: 10,
-        explanation: 'A legendary 2012 tweet from Donald Trump!'
+        explanation: 'A 2012 tweet... though it sounds 100% like Gemma Collins giving diet advice!'
       },
       {
-        id: 'wsi-8',
+        id: 'q_quote_8',
         type: 'MCQ',
-        category: 'Quotes',
+        category: 'Who Said It?',
         question: '"I\'ve earned my divaship."',
         options: ['Gemma Collins', 'Miss Piggy', 'Donald Trump'],
         answer: 'Gemma Collins',
         points: 10,
-        explanation: 'Gemma Collins justifying her demands on reality television.'
+        explanation: 'Her justification for her demands on reality TV.'
       },
       {
-        id: 'wsi-9',
+        id: 'q_quote_9',
         type: 'MCQ',
-        category: 'Quotes',
+        category: 'Who Said It?',
         question: '"Sorry losers and haters, but my I.Q. is one of the highest, and you all know it! Please don\'t feel so stupid or insecure, it\'s not your fault."',
         options: ['Gemma Collins', 'Miss Piggy', 'Donald Trump'],
         answer: 'Donald Trump',
         points: 10,
-        explanation: 'A genuine Donald Trump tweet from 2013.'
+        explanation: 'Another genuine tweet.'
       },
       {
-        id: 'wsi-10',
+        id: 'q_quote_10',
         type: 'MCQ',
-        category: 'Quotes',
+        category: 'Who Said It?',
         question: '"Beauty is in the eye of the beholder, and it may be necessary from time to time to give a stupid or misinformed beholder a black eye."',
         options: ['Gemma Collins', 'Miss Piggy', 'Donald Trump'],
         answer: 'Miss Piggy',
-        points: 10,
-        explanation: 'Miss Piggy\'s martial arts philosophy.'
+        points: 10
       }
     ]
   },
   {
-    id: 'one-star-reviews',
-    title: 'Guess the Movie from the Genuine 1-Star Review!',
-    description: '100% real, genuine 1-star reviews left by bewildered Amazon reviewers on cinema masterpieces.',
-    category: 'Film & Comedy',
+    id: 'pack-1-star-reviews',
+    title: 'Genuine 1-Star Film Reviews',
+    description: 'Guess the film from a genuine 1-star Amazon review.',
     questions: [
       {
-        id: 'review-1',
-        type: 'MCQ',
-        category: 'Film Reviews',
+        id: 'rev_1',
+        type: 'TEXT',
+        category: '1-Star Reviews',
         question: '"I wanted to like this film. But there\'s not a scary frame in the film... the characters to me were nothing more than fish food... Also, the music was boring. And what was with all the water? 1 star."',
-        options: ['Jaws', 'Titanic', 'The Abyss', 'Finding Nemo'],
         answer: 'Jaws',
-        points: 10,
-        explanation: 'A 1-star review for Steven Spielberg\'s Jaws!'
+        points: 10
       },
       {
-        id: 'review-2',
-        type: 'MCQ',
-        category: 'Film Reviews',
+        id: 'rev_2',
+        type: 'TEXT',
+        category: '1-Star Reviews',
         question: '"This was very confusing. Where were the other 2000? 1 star."',
-        options: ['2001: A Space Odyssey', '1984', '300', 'Apollo 13'],
-        answer: '2001: A Space Odyssey',
-        points: 10,
-        explanation: 'Stanley Kubrick\'s sci-fi masterpiece 2001: A Space Odyssey.'
+        answer: '2001: A Space Odyssey / 2001',
+        points: 10
       },
       {
-        id: 'review-3',
-        type: 'MCQ',
-        category: 'Film Reviews',
+        id: 'rev_3',
+        type: 'TEXT',
+        category: '1-Star Reviews',
         question: '"What\'s so great about it? It\'s like Stir Crazy, but without Gene Wilder. I didn\'t need to sit through 90 minutes just to see a guy going through a crap tube barfing up his guts. 1 star."',
-        options: ['The Shawshank Redemption', 'The Green Mile', 'Escape from Alcatraz', 'Con Air'],
-        answer: 'The Shawshank Redemption',
-        points: 10,
-        explanation: 'Ranked #1 on IMDb of all time: The Shawshank Redemption.'
+        answer: 'The Shawshank Redemption / Shawshank Redemption',
+        points: 10
       },
       {
-        id: 'review-4',
-        type: 'MCQ',
-        category: 'Film Reviews',
-        question: '"It ultimately boils down to some sisters trying to marry up... nothing really ever happens. It just goes on and on... There should have been explosions. And a dog. 1 star."',
-        options: ['Pride & Prejudice', 'Little Women', 'Sense and Sensibility', 'Emma'],
-        answer: 'Pride & Prejudice',
-        points: 10,
-        explanation: 'Review for Jane Austen\'s classic Pride & Prejudice.'
+        id: 'rev_4',
+        type: 'TEXT',
+        category: '1-Star Reviews',
+        question: '"It ultimately boils down to some sisters trying to marry (up, for the most part) in the world... nothing really ever happens. It just goes on and on and on... There should have been explosions. And a dog. 1 star."',
+        answer: 'Pride & Prejudice / Pride and Prejudice',
+        points: 10
       },
       {
-        id: 'review-5',
-        type: 'MCQ',
-        category: 'Film Reviews',
+        id: 'rev_5',
+        type: 'TEXT',
+        category: '1-Star Reviews',
         question: '"Neil Armstrong definitely saw aliens, so I don\'t know why they left them out in the movie. 1 star."',
-        options: ['First Man', 'Apollo 11', 'The Right Stuff', 'Interstellar'],
         answer: 'First Man',
-        points: 10,
-        explanation: 'Ryan Gosling\'s moon landing biopic First Man.'
+        points: 10
       },
       {
-        id: 'review-6',
-        type: 'MCQ',
-        category: 'Film Reviews',
-        question: '"The effect that came across was just a feeling of repulsion... because he should only have said, \'Prepare to die,\' once instead of nattering on about it. 1 star."',
-        options: ['The Princess Bride', 'Gladiator', 'Robin Hood', 'The Three Musketeers'],
+        id: 'rev_6',
+        type: 'TEXT',
+        category: '1-Star Reviews',
+        question: '"The effect that came across was just a feeling of repulsion with the worst violence, as in the torture scenes... because he should only have said, \'Prepare to die,\' once instead of nattering on about it. 1 star."',
         answer: 'The Princess Bride',
-        points: 10,
-        explanation: 'Inigo Montoya\'s iconic line in The Princess Bride!'
+        points: 10
       },
       {
-        id: 'review-7',
-        type: 'MCQ',
-        category: 'Film Reviews',
+        id: 'rev_7',
+        type: 'TEXT',
+        category: '1-Star Reviews',
         question: '"Cold is a way better title. 1 star."',
-        options: ['Frozen', 'Ice Age', 'The Day After Tomorrow', 'Snowpiercer'],
         answer: 'Frozen',
-        points: 10,
-        explanation: 'Review for Disney\'s Frozen.'
+        points: 10
       },
       {
-        id: 'review-8',
-        type: 'MCQ',
-        category: 'Film Reviews',
+        id: 'rev_8',
+        type: 'TEXT',
+        category: '1-Star Reviews',
         question: '"The Eagles could have just flown the Fellowship to Mordor and saved 800 pages or so. Religious propaganda. 1 star."',
-        options: ['The Lord of the Rings', 'The Hobbit', 'Harry Potter', 'The Chronicles of Narnia'],
-        answer: 'The Lord of the Rings',
+        answer: 'The Lord of the Rings / The Fellowship of the Ring',
         points: 10,
-        explanation: 'Review for The Lord of the Rings: The Fellowship of the Ring.'
+        explanation: 'Also accept The Fellowship of the Ring.'
       },
       {
-        id: 'review-9',
-        type: 'MCQ',
-        category: 'Film Reviews',
+        id: 'rev_9',
+        type: 'TEXT',
+        category: '1-Star Reviews',
         question: '"This movie was morally irreprehensible and ruined my evening. 1 star."',
-        options: ['There Will Be Blood', 'No Country for Old Men', 'The Wolf of Wall Street', 'Pulp Fiction'],
         answer: 'There Will Be Blood',
-        points: 10,
-        explanation: 'Daniel Day-Lewis in Paul Thomas Anderson\'s There Will Be Blood.'
+        points: 10
       },
       {
-        id: 'review-10',
-        type: 'MCQ',
-        category: 'Film Reviews',
-        question: '"The amount of plagiarism contained in this movie is staggering... It is the exact replica of the first movie "A New Hope". Even the title have the same meaning. 1 star."',
-        options: ['Star Wars: The Force Awakens', 'Rogue One', 'Avatar', 'Spaceballs'],
-        answer: 'Star Wars: The Force Awakens',
-        points: 10,
-        explanation: 'Review for Star Wars: Episode VII - The Force Awakens.'
+        id: 'rev_10',
+        type: 'TEXT',
+        category: '1-Star Reviews',
+        question: '"The amount of plagiarism contained in this movie is staggering, probably a world record. It is the exact replica of the first movie \'A New Hope\'. Even the title have the same meaning. 1 star."',
+        answer: 'Star Wars: The Force Awakens / The Force Awakens',
+        points: 10
       }
     ]
   },
   {
-    id: 'bohemian-rhapsody',
-    title: 'The "Is This The Real Life?" Round',
-    description: 'Read out as standard general knowledge questions. The 10th question asks teams to spot the secret operatic Bohemian Rhapsody connection!',
-    category: 'Music Secret Connection',
+    id: 'pack-gk-2',
+    title: 'General Knowledge: Round 2',
+    description: '9 general knowledge questions followed by a connection question.',
     questions: [
       {
-        id: 'queen-1',
+        id: 'boh_1',
         type: 'TEXT',
-        category: 'Theatre & History',
-        question: 'In traditional 16th-century Italian commedia dell\'arte theatre, what was the name of the boastful but cowardly clown character who dressed all in black?',
+        category: 'General Knowledge',
+        question: "In traditional 16th-century Italian commedia dell'arte theatre, what was the name of the boastful but cowardly clown character who traditionally dressed all in black?",
         answer: 'Scaramouche',
-        points: 10,
-        explanation: 'Scaramouche, Scaramouche, will you do the Fandango?'
+        points: 10
       },
       {
-        id: 'queen-2',
+        id: 'boh_2',
         type: 'TEXT',
-        category: 'Dance',
-        question: 'What is the name of a lively Spanish and Portuguese dance in triple time, typically danced by a couple with guitars and castanets?',
+        category: 'General Knowledge',
+        question: 'What is the name of a lively Spanish and Portuguese dance in triple time, typically danced by a couple and accompanied by guitars and castanets?',
         answer: 'Fandango',
-        points: 10,
-        explanation: '...will you do the Fandango?'
+        points: 10
       },
       {
-        id: 'queen-3',
+        id: 'boh_3',
         type: 'TEXT',
-        category: 'Technology',
-        question: 'Developed by Intel with Apple, what is the brand name of the high-speed interface represented by a downward-pointing lightning flash?',
+        category: 'General Knowledge',
+        question: 'Developed by Intel in collaboration with Apple, what is the brand name of the high-speed hardware interface used to connect external peripherals to a computer, represented by a logo of a downward-pointing lightning flash?',
         answer: 'Thunderbolt',
-        points: 10,
-        explanation: 'Thunderbolt and lightning, very very frightening me!'
+        points: 10
       },
       {
-        id: 'queen-4',
+        id: 'boh_4',
         type: 'TEXT',
-        category: 'Science',
-        question: 'Which Italian astronomer discovered the four largest moons of Jupiter in 1610, now named in his honour?',
-        answer: 'Galileo (Galilei)',
-        points: 10,
-        explanation: 'Galileo, Galileo, Galileo Figaro Magnifico!'
+        category: 'General Knowledge',
+        question: 'Which Italian astronomer discovered the four largest moons of Jupiter in 1610, which are now named in his honour?',
+        answer: 'Galileo / Galileo Galilei',
+        points: 10
       },
       {
-        id: 'queen-5',
+        id: 'boh_5',
         type: 'TEXT',
-        category: 'Animation',
-        question: 'What is the name of Geppetto\'s pet tuxedo cat in the 1940 Disney animated film Pinocchio, sharing a name with the Barber of Seville?',
+        category: 'General Knowledge',
+        question: "What is the name of Geppetto's pet tuxedo cat in the 1940 Disney animated film Pinocchio, a name he shares with the famous 'Barber of Seville'?",
         answer: 'Figaro',
-        points: 10,
-        explanation: 'Galileo Figaro!'
+        points: 10
       },
       {
-        id: 'queen-6',
+        id: 'boh_6',
         type: 'TEXT',
-        category: 'Disney',
+        category: 'General Knowledge',
         question: 'What is the name of the villainous, wish-granting King in the 2023 Disney animated musical film Wish?',
-        answer: 'Magnifico (King Magnifico)',
-        points: 10,
-        explanation: 'Magnifico-o-o-o!'
+        answer: 'Magnifico / King Magnifico',
+        points: 10
       },
       {
-        id: 'queen-7',
+        id: 'boh_7',
         type: 'TEXT',
-        category: 'World Cultures',
-        question: 'Translating to "In the name of God", what Arabic phrase is recited as the opening word of almost every chapter of the Quran?',
+        category: 'General Knowledge',
+        question: "Translating to 'In the name of God' or 'In the name of Allah', what Arabic phrase is recited as the opening word of almost every chapter of the Quran?",
         answer: 'Bismillah',
-        points: 10,
-        explanation: 'Bismillah! No, we will not let you go!'
+        points: 10
       },
       {
-        id: 'queen-8',
+        id: 'boh_8',
         type: 'TEXT',
-        category: 'Religion & Literature',
-        question: 'Derived from a Philistine god in Ekron, what nine-letter name is often used as a synonym for Satan or the "prince of demons"?',
+        category: 'General Knowledge',
+        question: "Derived from a Philistine god worshipped in Ekron, what nine-letter name is often used in literature and religion as a synonym for Satan or the 'prince of demons'?",
         answer: 'Beelzebub',
-        points: 10,
-        explanation: 'Beelzebub has a devil put aside for me!'
+        points: 10
       },
       {
-        id: 'queen-9',
+        id: 'boh_9',
         type: 'TEXT',
-        category: 'Pop Music',
-        question: 'What phrase, meaning "my mother" in Italian, was the title of a 1975 UK number one hit that ironically knocked Queen off the top spot?',
+        category: 'General Knowledge',
+        question: "What phrase, meaning 'my mother' in Italian, was the title of a 1975 UK number one hit that ironically knocked Queen off the top spot?",
         answer: 'Mamma Mia',
-        points: 10,
-        explanation: 'Mamma mia, mamma mia, mamma mia let me go!'
+        points: 10
       },
       {
-        id: 'queen-10',
+        id: 'boh_10',
         type: 'TEXT',
-        category: 'The Grand Connection',
-        question: 'Look closely at your previous nine answers (Scaramouche, Fandango, Thunderbolt, Galileo, Figaro, Magnifico, Bismillah, Beelzebub, Mamma Mia). What is the specific connection between them all?',
-        answer: 'Lyrics shouted in Queen\'s Bohemian Rhapsody (operatic section)',
-        points: 20,
-        explanation: 'Every answer is a lyric or character shouted during the legendary operatic section of Bohemian Rhapsody!'
+        category: 'The Connection',
+        question: 'Look closely at your previous nine answers. What is the specific connection between them all?',
+        answer: 'Bohemian Rhapsody',
+        points: 10,
+        explanation: 'They are all words shouted during the operatic section of Queen\'s "Bohemian Rhapsody" (Scaramouche, Fandango, Thunderbolt, Galileo, Figaro, Magnifico, Bismillah, Beelzebub, Mamma Mia).'
       }
     ]
   },
   {
-    id: 'ikea-or-swear',
+    id: 'pack-ikea-or-swear',
     title: 'IKEA Chair or Swedish Swear?',
-    description: 'Teams must guess whether each Swedish-sounding word is an actual chair sold by IKEA, or a real Swedish swear word/insult!',
-    category: 'Comedy & Languages',
+    description: 'Guess whether each word is an IKEA chair or a Swedish swear word.',
     questions: [
       {
-        id: 'ikea-1',
+        id: 'chair_1',
         type: 'MCQ',
-        category: 'Swedish Words',
-        question: 'Jävlar: Is it an IKEA Chair or a Swedish Swear?',
+        category: 'IKEA or Swear?',
+        question: 'Jävlar — Is it a sleek dining chair or a swear word?',
         options: ['IKEA Chair', 'Swedish Swear'],
         answer: 'Swedish Swear',
         points: 10,
-        explanation: 'Swedish Swear! Translates to "Devils" or "Damn it!"'
+        explanation: 'Bonus translation (+1 pt): Devils / Damn it.'
       },
       {
-        id: 'ikea-2',
+        id: 'chair_2',
         type: 'MCQ',
-        category: 'Swedish Words',
-        question: 'Sandsberg: Is it an IKEA Chair or a Swedish Swear?',
+        category: 'IKEA or Swear?',
+        question: 'Sandsberg — Is it a sturdy office chair or a swear word?',
         options: ['IKEA Chair', 'Swedish Swear'],
         answer: 'IKEA Chair',
         points: 10,
-        explanation: 'IKEA Chair! A classic basic pine dining chair.'
+        explanation: 'It is a basic IKEA dining chair.'
       },
       {
-        id: 'ikea-3',
+        id: 'chair_3',
         type: 'MCQ',
-        category: 'Swedish Words',
-        question: 'Kuk: Is it an IKEA Chair or a Swedish Swear?',
+        category: 'IKEA or Swear?',
+        question: 'Kuk — Is it a minimalist stool or a swear word?',
         options: ['IKEA Chair', 'Swedish Swear'],
         answer: 'Swedish Swear',
         points: 10,
-        explanation: 'Swedish Swear! Translates to male genitalia ("Cock/Dick"). Definitely not sold in flat-pack!'
+        explanation: 'Bonus translation (+1 pt): Cock / Dick.'
       },
       {
-        id: 'ikea-4',
+        id: 'chair_4',
         type: 'MCQ',
-        category: 'Swedish Words',
-        question: 'Poäng: Is it an IKEA Chair or a Swedish Swear?',
+        category: 'IKEA or Swear?',
+        question: 'Poäng — Is it a classic lounge armchair or a swear word?',
         options: ['IKEA Chair', 'Swedish Swear'],
         answer: 'IKEA Chair',
         points: 10,
-        explanation: 'IKEA Chair! One of the most famous bentwood armchairs in world history.'
+        explanation: "One of IKEA's most famous bentwood armchairs."
       },
       {
-        id: 'ikea-5',
+        id: 'chair_5',
         type: 'MCQ',
-        category: 'Swedish Words',
-        question: 'Fan: Is it an IKEA Chair or a Swedish Swear?',
+        category: 'IKEA or Swear?',
+        question: 'Fan — Is it a space-saving folding chair or a swear word?',
         options: ['IKEA Chair', 'Swedish Swear'],
         answer: 'Swedish Swear',
         points: 10,
-        explanation: 'Swedish Swear! Translates to "The Devil" or "Fuck".'
+        explanation: 'Bonus translation (+1 pt): The Devil / Fuck.'
       },
       {
-        id: 'ikea-6',
+        id: 'chair_6',
         type: 'MCQ',
-        category: 'Swedish Words',
-        question: 'Ekenäset: Is it an IKEA Chair or a Swedish Swear?',
+        category: 'IKEA or Swear?',
+        question: 'Ekenäset — Is it a retro-style wooden armchair or a swear word?',
         options: ['IKEA Chair', 'Swedish Swear'],
         answer: 'IKEA Chair',
         points: 10,
-        explanation: 'IKEA Chair! A handsome mid-century retro wooden armchair.'
+        explanation: 'A retro wooden armchair.'
       },
       {
-        id: 'ikea-7',
+        id: 'chair_7',
         type: 'MCQ',
-        category: 'Swedish Words',
-        question: 'Skit: Is it an IKEA Chair or a Swedish Swear?',
+        category: 'IKEA or Swear?',
+        question: "Skit — Is it a brightly coloured children's chair or a swear word?",
         options: ['IKEA Chair', 'Swedish Swear'],
         answer: 'Swedish Swear',
         points: 10,
-        explanation: 'Swedish Swear! Translates to "Shit".'
+        explanation: 'Bonus translation (+1 pt): Shit.'
       },
       {
-        id: 'ikea-8',
+        id: 'chair_8',
         type: 'MCQ',
-        category: 'Swedish Words',
-        question: 'Dyvlinge: Is it an IKEA Chair or a Swedish Swear?',
+        category: 'IKEA or Swear?',
+        question: 'Dyvlinge — Is it a swivel easy chair or a swear word?',
         options: ['IKEA Chair', 'Swedish Swear'],
         answer: 'IKEA Chair',
         points: 10,
-        explanation: 'IKEA Chair! A low swivel easy chair.'
+        explanation: 'A low swivel easy chair.'
       },
       {
-        id: 'ikea-9',
+        id: 'chair_9',
         type: 'MCQ',
-        category: 'Swedish Words',
-        question: 'Rövhål: Is it an IKEA Chair or a Swedish Swear?',
+        category: 'IKEA or Swear?',
+        question: 'Rövhål — Is it a comfortable padded dining chair or a swear word?',
         options: ['IKEA Chair', 'Swedish Swear'],
         answer: 'Swedish Swear',
         points: 10,
-        explanation: 'Swedish Swear! Translates directly to "Asshole".'
+        explanation: 'Bonus translation (+1 pt): Arsehole.'
       },
       {
-        id: 'ikea-10',
+        id: 'chair_10',
         type: 'MCQ',
-        category: 'Swedish Words',
-        question: 'Strandmon: Is it an IKEA Chair or a Swedish Swear?',
+        category: 'IKEA or Swear?',
+        question: 'Strandmon — Is it a high-backed wing chair or a swear word?',
         options: ['IKEA Chair', 'Swedish Swear'],
         answer: 'IKEA Chair',
         points: 10,
-        explanation: 'IKEA Chair! Their famous high-backed wingback reading chair.'
+        explanation: "IKEA's classic wingback reading chair."
       }
     ]
   },
   {
-    id: 'chase-celebrity',
-    title: 'The Chase: Celebrity Cash Builder Master Archive',
-    description: 'Rapid-fire buzzer cash builder questions faced by celebrities on ITV\'s The Chase.',
-    category: 'TV Game Show',
+    id: 'pack-chase-armstrong',
+    title: 'Cash Builder: Alexander Armstrong',
+    description: 'Beat Alexander Armstrong! 1 point per right answer (+3 bonus if you beat his score, +1 if you tie).',
     questions: [
-      {
-        id: 'chase-1',
-        type: 'BUZZER',
-        category: 'TV & Drama',
-        question: 'The Greedy Blinders recipe book is based on what hit TV series?',
-        answer: 'Peaky Blinders',
-        points: 10,
-        explanation: 'Answered correctly by David James on The Chase.'
-      },
-      {
-        id: 'chase-2',
-        type: 'BUZZER',
-        category: 'Pop Culture',
-        question: 'Washington National Cathedral has a gargoyle carved in the likeness of which Star Wars villain?',
-        answer: 'Darth Vader',
-        points: 10,
-        explanation: 'Darth Vader gargoyle was placed on the northwest tower after a 1980s design contest.'
-      },
-      {
-        id: 'chase-3',
-        type: 'BUZZER',
-        category: 'Board Games',
-        question: 'What popular board game allows a maximum of 32 houses and 12 hotels?',
-        answer: 'Monopoly',
-        points: 10,
-        explanation: 'Keith Chegwin got this right in his cash builder!'
-      },
-      {
-        id: 'chase-4',
-        type: 'BUZZER',
-        category: 'Geography',
-        question: 'What is the only country in the world that borders both the Caspian Sea and the Persian Gulf?',
-        answer: 'Iran',
-        points: 15,
-        explanation: 'Iran is flanked by the Caspian Sea to the north and the Persian Gulf to the south.'
-      },
-      {
-        id: 'chase-5',
-        type: 'BUZZER',
-        category: 'Science',
-        question: 'What chemical element has the atomic number 79 and the Latin symbol Au?',
-        answer: 'Gold (Aurum)',
-        points: 10,
-        explanation: 'Au comes from the Latin word aurum.'
-      },
-      {
-        id: 'chase-6',
-        type: 'BUZZER',
-        category: 'Astronomy',
-        question: 'Which planet in our solar system rotates clockwise on its axis (retrograde rotation), opposite to most other planets?',
-        answer: 'Venus (also Uranus has extreme tilt)',
-        points: 10,
-        explanation: 'Venus rotates east to west, so the Sun rises in the west!'
-      },
-      {
-        id: 'chase-7',
-        type: 'BUZZER',
-        category: 'Music',
-        question: 'How many keys are there on a standard full-size modern acoustic piano?',
-        answer: '88 keys (52 white, 36 black)',
-        points: 10,
-        explanation: 'Standard acoustic grand or upright piano has 88 keys.'
-      },
-      {
-        id: 'chase-8',
-        type: 'BUZZER',
-        category: 'Food & Cooking',
-        question: 'What Jamaican seasoning is mainly flavored with allspice and Scotch bonnet peppers?',
-        answer: 'Jerk seasoning',
-        points: 10,
-        explanation: 'Answered correctly by Carrie Grant.'
-      }
+      { id: 'aa_1', type: 'TEXT', category: 'Cash Builder', question: 'What annual British show was founded by a dog biscuit salesman?', answer: 'Crufts', points: 1, explanation: "Alexander's answer: Panto (Incorrect)" },
+      { id: 'aa_2', type: 'TEXT', category: 'Cash Builder', question: 'Dairy Milk and More is a range of chocolate bars by what company?', answer: 'Cadbury', points: 1, explanation: "Alexander's answer: Cadbury (Correct)" },
+      { id: 'aa_3', type: 'TEXT', category: 'Cash Builder', question: 'What sport features in the Carol Ann Duffy poem "The Christmas Truce"?', answer: 'Football', points: 1, explanation: "Alexander's answer: Football (Correct)" },
+      { id: 'aa_4', type: 'TEXT', category: 'Cash Builder', question: 'The Strait of Otranto separates Albania from the heel of what country?', answer: 'Italy', points: 1, explanation: "Alexander's answer: Italy (Correct)" },
+      { id: 'aa_5', type: 'TEXT', category: 'Cash Builder', question: 'Actress Pat Kirkwood was the first female castaway on what radio show?', answer: 'Desert Island Discs', points: 1, explanation: "Alexander's answer: Desert Island (Correct)" },
+      { id: 'aa_6', type: 'TEXT', category: 'Cash Builder', question: 'What government agency is housed in a Cheltenham building known as The Doughnut?', answer: 'GCHQ', points: 1, explanation: "Alexander's answer: GCHQ (Correct)" },
+      { id: 'aa_7', type: 'TEXT', category: 'Cash Builder', question: '"The Last Devil to Die" is the fourth book in a series by which TV presenter?', answer: 'Richard Osman', points: 1, explanation: "Alexander's answer: Richard Osman (Correct)" },
+      { id: 'aa_8', type: 'TEXT', category: 'Cash Builder', question: 'What legumes did the Guardian call an obvious choice for a jacket potato filling?', answer: 'Baked beans / Beans', points: 1, explanation: "Alexander's answer: Kidney beans (Incorrect)" },
+      { id: 'aa_9', type: 'TEXT', category: 'Cash Builder', question: 'What is the name of the highest peak in both Cyprus and Greece?', answer: 'Mount Olympus / Olympus', points: 1, explanation: "Alexander's answer: Pass (Incorrect)" },
+      { id: 'aa_10', type: 'TEXT', category: 'Cash Builder', question: 'Which biblical figure was arrested in the Garden of Gethsemane?', answer: 'Jesus Christ / Jesus', points: 1, explanation: "Alexander's answer: Judas Iscariot (Incorrect) — Alexander scored 6/10 (£6,000)!" }
     ]
   },
   {
-    id: 'media-rich-trivia',
-    title: 'Media-Rich Pop Culture & Visual Showcase',
-    description: 'High-definition photo rounds, album artworks, and landmark challenges.',
-    category: 'Visual & Media',
+    id: 'pack-chase-carr',
+    title: 'Cash Builder: Jimmy Carr',
+    description: 'Beat Jimmy Carr! 1 point per right answer (+3 bonus if you beat his score, +1 if you tie).',
     questions: [
-      {
-        id: 'media-1',
-        type: 'MCQ',
-        category: 'Landmarks',
-        question: 'Identify this iconic architectural wonder located on Sydney Harbour, Australia:',
-        mediaType: 'image',
-        mediaUrl: 'https://images.unsplash.com/photo-1523428096881-5cb79904780c?w=900&auto=format&fit=crop&q=80',
-        options: ['Sydney Opera House', 'Guggenheim Bilbao', 'Lotus Temple Delhi', 'Valencia City of Arts'],
-        answer: 'Sydney Opera House',
-        points: 10,
-        explanation: 'Designed by Danish architect Jørn Utzon and formally opened in 1973.'
-      },
-      {
-        id: 'media-2',
-        type: 'MCQ',
-        category: 'Astronomy',
-        question: 'Which astronomical body is pictured here with its famous rings composed largely of water ice and rock?',
-        mediaType: 'image',
-        mediaUrl: 'https://images.unsplash.com/photo-1614732414444-096e5f1122d5?w=900&auto=format&fit=crop&q=80',
-        options: ['Saturn', 'Jupiter', 'Neptune', 'Uranus'],
-        answer: 'Saturn',
-        points: 10,
-        explanation: 'Christiaan Huygens first recognized the true nature of Saturn\'s rings in 1655.'
-      },
-      {
-        id: 'media-3',
-        type: 'MCQ',
-        category: 'Art & History',
-        question: 'Painted by Leonardo da Vinci between 1503 and 1506, what is the world-famous title of this portrait in the Louvre?',
-        mediaType: 'image',
-        mediaUrl: 'https://images.unsplash.com/photo-1579783900882-c0d3dad7b119?w=900&auto=format&fit=crop&q=80',
-        options: ['Mona Lisa', 'The Girl with a Pearl Earring', 'The Birth of Venus', 'Lady with an Ermine'],
-        answer: 'Mona Lisa',
-        points: 10,
-        explanation: 'Known in Italian as La Gioconda, portraying Lisa Gherardini.'
-      },
-      {
-        id: 'media-4',
-        type: 'MCQ',
-        category: 'Wonders of the World',
-        question: 'Which ancient wonder, built in Agra from ivory-white marble by Mughal Emperor Shah Jahan, is pictured below?',
-        mediaType: 'image',
-        mediaUrl: 'https://images.unsplash.com/photo-1564507592333-c60657eea523?w=900&auto=format&fit=crop&q=80',
-        options: ['Taj Mahal', 'Red Fort', 'Humayun\'s Tomb', 'Fatehpur Sikri'],
-        answer: 'Taj Mahal',
-        points: 10,
-        explanation: 'Commissioned in 1631 by Emperor Shah Jahan to house the tomb of his favorite wife Mumtaz Mahal.'
-      }
+      { id: 'jc_1', type: 'TEXT', category: 'Cash Builder', question: '"Andale, andale!" and "Arriba, arriba!" are catchphrases of what cartoon mouse?', answer: 'Speedy Gonzales', points: 1, explanation: "Jimmy's answer: Speedy Gonzales (Correct)" },
+      { id: 'jc_2', type: 'TEXT', category: 'Cash Builder', question: 'What brand of biscuit has a name that means "to socialise"?', answer: 'Hobnob / Hobnobs', points: 1, explanation: "Jimmy's answer: Hobnob (Correct)" },
+      { id: 'jc_3', type: 'TEXT', category: 'Cash Builder', question: 'In April 2012, what US Film Festival visited London for the first time?', answer: 'Sundance', points: 1, explanation: "Jimmy's answer: Sundance (Correct)" },
+      { id: 'jc_4', type: 'TEXT', category: 'Cash Builder', question: 'Howard Florey and Ernst Chain isolated and purified what antibiotic?', answer: 'Penicillin', points: 1, explanation: "Jimmy's answer: Don't know (Incorrect)" },
+      { id: 'jc_5', type: 'TEXT', category: 'Cash Builder', question: 'In May 2012, who was appointed England football manager?', answer: 'Roy Hodgson', points: 1, explanation: "Jimmy's answer: Pass (Incorrect)" },
+      { id: 'jc_6', type: 'TEXT', category: 'Cash Builder', question: 'In the rhyme "Monday\'s Child", what day\'s child works hard for a living?', answer: "Saturday's Child / Saturday", points: 1, explanation: "Jimmy's answer: Wednesday (Incorrect)" },
+      { id: 'jc_7', type: 'TEXT', category: 'Cash Builder', question: 'Which Scottish Queen was executed at Fotheringhay in Northamptonshire?', answer: 'Mary, Queen of Scots / Mary Stuart', points: 1, explanation: "Jimmy's answer: Pass (Incorrect)" },
+      { id: 'jc_8', type: 'TEXT', category: 'Cash Builder', question: 'Who duetted with Aretha Franklin on the hit "I Knew You Were Waiting (For Me)"?', answer: 'George Michael', points: 1, explanation: "Jimmy's answer: George Michael (Correct)" },
+      { id: 'jc_9', type: 'TEXT', category: 'Cash Builder', question: 'What Japanese company gives its name to a set of British Radio Awards?', answer: 'Sony', points: 1, explanation: "Jimmy's answer: Sony (Correct)" },
+      { id: 'jc_10', type: 'TEXT', category: 'Cash Builder', question: 'What type of fuel container is so named because it was first used in Germany?', answer: 'Jerrycan', points: 1, explanation: "Jimmy's answer: Jerrycan (Correct)" },
+      { id: 'jc_11', type: 'TEXT', category: 'Cash Builder', question: 'Which politician famously said, "There is no such thing as society"?', answer: 'Margaret Thatcher / Thatcher', points: 1, explanation: "Jimmy scored 5/11 (£5,000)!" }
     ]
   }
 ];
