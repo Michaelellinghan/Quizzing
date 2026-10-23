@@ -137,3 +137,57 @@ export async function adjudicateAnswerWithAI(
     throw err;
   }
 }
+
+export async function autocompleteQuestionWithAI(
+  promptText: string,
+  currentCategory = 'General Knowledge',
+  currentType: QuestionType = 'MCQ'
+): Promise<Partial<Question>> {
+  try {
+    const response = await fetchWithTimeout('/api/ai/autocomplete-question', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ promptText, currentCategory, currentType })
+    }, 8000);
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to autocomplete question');
+    }
+
+    const data = await response.json();
+    return data.data;
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      throw new Error('AI Auto-Fill timed out. Please enter details manually.');
+    }
+    throw err;
+  }
+}
+
+export async function magicParseQuestionsWithAI(
+  rawText: string,
+  defaultCategory = 'General Trivia',
+  defaultType: QuestionType = 'TEXT'
+): Promise<Question[]> {
+  try {
+    const response = await fetchWithTimeout('/api/ai/magic-parse-paste', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ rawText, defaultCategory, defaultType })
+    }, 10000);
+
+    if (!response.ok) {
+      const errorData = await response.json().catch(() => ({}));
+      throw new Error(errorData.error || 'Failed to parse questions');
+    }
+
+    const data = await response.json();
+    return data.questions || [];
+  } catch (err: any) {
+    if (err.name === 'AbortError') {
+      throw new Error('AI Text Parsing timed out. Try pasting fewer lines.');
+    }
+    throw err;
+  }
+}

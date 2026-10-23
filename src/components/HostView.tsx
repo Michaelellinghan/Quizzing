@@ -92,9 +92,52 @@ export const HostView: React.FC<HostViewProps> = ({
   const [showAddQuestionModal, setShowAddQuestionModal] = useState<boolean>(false);
   const [aiAdjudicatingId, setAiAdjudicatingId] = useState<string | null>(null);
   const [aiVerdict, setAiVerdict] = useState<{ id: string; text: string; verdict: string } | null>(null);
+  const [quickAddText, setQuickAddText] = useState('');
+  const [quickAddNotice, setQuickAddNotice] = useState<string | null>(null);
+  const [showInGameBar, setShowInGameBar] = useState(false);
 
   const currentQ: Question | undefined = room.questions[room.currentQIndex];
   const sortedPlayers = Object.values(room.players || {}).sort((a, b) => b.score - a.score);
+
+  const handleInGameQuickAdd = (e: React.FormEvent) => {
+    e.preventDefault();
+    const raw = quickAddText.trim();
+    if (!raw) return;
+
+    let question = raw;
+    let answer = 'Answer required';
+
+    if (raw.includes('|')) {
+      const parts = raw.split('|');
+      question = parts[0].trim();
+      answer = parts.slice(1).join('|').trim();
+    } else if (raw.includes(' - ')) {
+      const parts = raw.split(' - ');
+      question = parts[0].trim();
+      answer = parts.slice(1).join(' - ').trim();
+    } else if (raw.includes('?')) {
+      const qMarkIdx = raw.lastIndexOf('?');
+      question = raw.substring(0, qMarkIdx + 1).trim();
+      const ansPart = raw.substring(qMarkIdx + 1).trim();
+      if (ansPart) answer = ansPart;
+    }
+
+    const newQ: Question = {
+      id: `live_q_${Date.now()}_${Math.random().toString(36).substring(2, 5)}`,
+      type: 'TEXT',
+      category: 'Bonus Live Question',
+      question,
+      answer,
+      points: 10
+    };
+
+    if (onAddQuestion) {
+      onAddQuestion(newQ, room.currentQIndex + 1);
+      setQuickAddNotice(`Added as Question #${room.currentQIndex + 2}!`);
+      setTimeout(() => setQuickAddNotice(null), 3000);
+      setQuickAddText('');
+    }
+  };
 
   // Ask AI to adjudicate an answer
   const handleAiAdjudicate = async (playerId: string, playerAnswer: string) => {
@@ -246,6 +289,48 @@ export const HostView: React.FC<HostViewProps> = ({
           >
             Next <ChevronRight className="w-4 h-4" />
           </button>
+        </div>
+
+        {/* Quick In-Game 1-Line Question Bar */}
+        <div className="bg-slate-950/70 border border-slate-800 rounded-xl p-2.5 flex flex-col gap-1.5">
+          <div className="flex items-center justify-between text-[11px]">
+            <span className="font-extrabold text-amber-400 flex items-center gap-1">
+              <Zap className="w-3.5 h-3.5 text-yellow-400" />
+              <span>⚡ Quick-Add Question to Live Game:</span>
+            </span>
+            <button
+              type="button"
+              onClick={() => (onOpenQuizStudio ? onOpenQuizStudio() : setShowAddQuestionModal(true))}
+              className="text-amber-300 hover:text-amber-200 font-extrabold text-[10px] underline cursor-pointer"
+            >
+              Open Full Studio
+            </button>
+          </div>
+
+          <form onSubmit={handleInGameQuickAdd} className="flex gap-1.5">
+            <input
+              type="text"
+              value={quickAddText}
+              onChange={(e) => setQuickAddText(e.target.value)}
+              placeholder="Type: Question | Answer (e.g. What is Dave's middle name? | John)"
+              className="flex-1 px-3 py-1.5 rounded-lg bg-slate-900 border border-slate-700 text-xs text-white placeholder-slate-500 focus:outline-none focus:border-amber-400"
+            />
+            <button
+              type="submit"
+              disabled={!quickAddText.trim()}
+              className="px-3 py-1.5 rounded-lg bg-amber-500 hover:bg-amber-400 disabled:opacity-30 text-slate-950 font-black text-xs flex items-center gap-1 shrink-0 cursor-pointer transition shadow"
+            >
+              <Plus className="w-3.5 h-3.5 stroke-[3]" />
+              <span>Add Next</span>
+            </button>
+          </form>
+
+          {quickAddNotice && (
+            <div className="text-[11px] font-bold text-emerald-400 flex items-center gap-1 animate-fade-in">
+              <Check className="w-3 h-3 text-emerald-400" />
+              <span>{quickAddNotice}</span>
+            </div>
+          )}
         </div>
 
         {/* Question Details */}

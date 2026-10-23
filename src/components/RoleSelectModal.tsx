@@ -64,28 +64,35 @@ export const RoleSelectModal: React.FC<RoleSelectModalProps> = ({
       </div>
 
       {/* Question Studio & Custom Quiz Creator Banner */}
-      <div className="bg-gradient-to-r from-amber-500/15 via-rose-500/10 to-purple-500/15 border-2 border-amber-500/40 rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-xl">
+      <div className="bg-gradient-to-r from-amber-500/20 via-purple-500/15 to-rose-500/20 border-2 border-amber-500/50 rounded-3xl p-5 sm:p-6 flex flex-col sm:flex-row items-center justify-between gap-4 shadow-2xl relative overflow-hidden">
         <div className="flex items-center gap-4 text-left">
-          <div className="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-500/40 text-amber-300 flex items-center justify-center shrink-0">
-            <Sparkles className="w-6 h-6 text-amber-400" />
+          <div className="w-14 h-14 rounded-2xl bg-gradient-to-tr from-amber-500 to-purple-600 border border-amber-400/50 text-white flex items-center justify-center shrink-0 shadow-lg">
+            <Sparkles className="w-7 h-7 text-white" />
           </div>
           <div>
-            <div className="flex items-center gap-2">
-              <span className="font-black text-white text-base sm:text-lg">Write Custom Questions</span>
-              <span className="text-[10px] font-bold px-2.5 py-0.5 rounded-full bg-amber-500 text-slate-950 uppercase tracking-wider">Quiz Studio</span>
+            <div className="flex items-center gap-2 flex-wrap">
+              <span className="font-black text-white text-base sm:text-xl">Make Your Own Questions</span>
+              <span className="text-[10px] font-extrabold px-2.5 py-0.5 rounded-full bg-amber-400 text-slate-950 uppercase tracking-wider">Fast & Easy</span>
             </div>
-            <p className="text-xs text-slate-300 mt-1 max-w-xl leading-relaxed">
-              Want to write your own trivia round? Create custom questions with free-text typing, multiple choice, or buzzer speed, paste a list from notes, or generate rounds with AI!
+            <p className="text-xs text-slate-200 mt-1 max-w-xl leading-relaxed">
+              Create your dream quiz in seconds: use <strong>1-Click AI Generation</strong> on any topic, rapid 1-line typing (<code className="text-amber-300 font-mono">Question | Answer</code>), magic AI auto-fill, or paste messy notes from your phone!
             </p>
+            <div className="flex items-center gap-2 mt-2.5 flex-wrap text-[11px] font-bold">
+              <span className="px-2.5 py-0.5 rounded-md bg-purple-900/60 text-purple-200 border border-purple-700/50">⚡ 1-Click AI Pack</span>
+              <span className="px-2.5 py-0.5 rounded-md bg-amber-900/60 text-amber-200 border border-amber-700/50">✍️ 1-Line Rapid Entry</span>
+              <span className="px-2.5 py-0.5 rounded-md bg-emerald-900/60 text-emerald-200 border border-emerald-700/50">✨ Magic Auto-Fill</span>
+              <span className="px-2.5 py-0.5 rounded-md bg-blue-900/60 text-blue-200 border border-blue-700/50">📋 Paste Notes & CSV</span>
+            </div>
           </div>
         </div>
 
         {onOpenQuizStudio && (
           <button
             onClick={onOpenQuizStudio}
-            className="w-full sm:w-auto py-3 px-5 rounded-2xl bg-gradient-to-r from-amber-500 to-amber-600 hover:from-amber-400 hover:to-amber-500 text-slate-950 font-black text-xs sm:text-sm shadow-md transition flex items-center justify-center gap-2 shrink-0 cursor-pointer"
+            className="w-full sm:w-auto py-3.5 px-6 rounded-2xl bg-gradient-to-r from-amber-500 via-amber-400 to-amber-500 hover:from-amber-400 hover:to-amber-300 text-slate-950 font-black text-xs sm:text-sm shadow-xl transition flex items-center justify-center gap-2 shrink-0 cursor-pointer hover:scale-105"
           >
-            <span>✍️ Create & Write Questions</span>
+            <Sparkles className="w-4 h-4 fill-slate-950" />
+            <span>Open Quiz Studio & Creator</span>
           </button>
         )}
       </div>

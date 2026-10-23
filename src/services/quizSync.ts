@@ -714,6 +714,7 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
   const [connected, setConnected] = useState<boolean>(false);
   const [latencyMs, setLatencyMs] = useState<number>(45);
 
+  const clientIdRef = useRef('client_' + Math.random().toString(36).slice(2));
   const mqttClientsRef = useRef<MqttClient[]>([]);
   const eventSourceRef = useRef<EventSource | null>(null);
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
@@ -750,6 +751,14 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
   const applyRoomState = useCallback((incoming: Partial<GameRoom>, force = false) => {
     if (!incoming) return;
     const current = roomRef.current;
+    const currentLastUpdated = current.lastUpdated || 0;
+    const incomingLastUpdated = incoming.lastUpdated || 0;
+
+    // Requirement 4: Reject stale state timestamp
+    if (incomingLastUpdated > 0 && currentLastUpdated > 0 && incomingLastUpdated < currentLastUpdated) {
+      return;
+    }
+
     const currentRev = current.revision || 1;
     const incomingRev = incoming.revision || 1;
     const currentPlayersCount = Object.keys(current.players || {}).length;
@@ -790,17 +799,25 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
           broadcastChannelRef.current.postMessage({
             type: 'SYNC_ROOM',
             roomCode: normalizedCode,
+            senderId: clientIdRef.current,
+            fromRole: role,
             room: mergedRoom,
             revision: mergedRoom.revision,
-            fromHost: force
+            fromHost: role === 'host'
           });
         } catch (e) {}
       }
     }
-  }, [normalizedCode]);
+  }, [normalizedCode, role]);
 
   const publishToNetwork = useCallback((msg: any, options?: { skipNtfy?: boolean }) => {
-    const payloadWithTs = { ...msg, sentAt: Date.now() };
+    // Requirement 1: Attach unique senderId and sentAt timestamp to every outgoing message
+    const payloadWithTs = {
+      ...msg,
+      senderId: clientIdRef.current,
+      fromRole: role || msg.fromRole,
+      sentAt: Date.now()
+    };
     const rawJson = JSON.stringify(payloadWithTs);
     const mqttTopic = `quizcast_mesh_v7_${normalizedCode}`;
     const httpTopic = `quizcast_ntfy_v7_${normalizedCode.toLowerCase()}`;
@@ -844,7 +861,7 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
         broadcastChannelRef.current.postMessage(payloadWithTs);
       } catch (e) {}
     }
-  }, [normalizedCode]);
+  }, [normalizedCode, role]);
 
   useEffect(() => {
     if (!role) return;
@@ -866,6 +883,8 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
     const handleNetworkMessage = (data: any) => {
       if (isCleanedUp || !data || !data.type) return;
       if (data.roomCode && data.roomCode !== normalizedCode) return;
+      // Requirement 1: Immediately ignore own delayed echo from ntfy.sh or MQTT
+      if (data.senderId && data.senderId === clientIdRef.current) return;
       if (data.nonce && isDuplicate(data.nonce)) return;
 
       if (data.sentAt) {
@@ -873,12 +892,18 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
         setLatencyMs(rtt);
       }
 
-      const isAuthority = role === 'tv' || role === 'host';
+      // Requirement 4: Reject any incoming SYNC_ROOM or HOST_ACTION whose room.lastUpdated is older than current roomRef.current.lastUpdated
+      if (data.room && data.room.lastUpdated && roomRef.current.lastUpdated) {
+        if (data.room.lastUpdated < roomRef.current.lastUpdated) {
+          return;
+        }
+      }
 
       switch (data.type) {
         case 'PLAYER_JOIN':
         case 'REQUEST_ROOM_SYNC': {
-          if (isAuthority) {
+          // Requirement 2: Only role === 'host' is authoritative to broadcast SYNC_ROOM phase/question state
+          if (role === 'host') {
             let current = roomRef.current;
             if (data.playerId && data.type === 'PLAYER_JOIN') {
               current = reduceGameAction(current, {
@@ -889,21 +914,20 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
               });
               applyRoomState(current, true);
             }
-            // Only reply if we are Host, or if we are TV and a Player asked
-            if (role === 'host' || data.type === 'PLAYER_JOIN' || data.fromRole === 'player') {
-              publishToNetwork({
-                type: 'SYNC_ROOM',
-                roomCode: normalizedCode,
-                room: current,
-                revision: current.revision || Date.now(),
-                fromHost: role === 'host',
-                targetPlayerId: data.playerId,
-                nonce: `sync_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
-              });
-            }
+            publishToNetwork({
+              type: 'SYNC_ROOM',
+              roomCode: normalizedCode,
+              fromRole: 'host',
+              room: current,
+              revision: current.revision || Date.now(),
+              fromHost: true,
+              targetPlayerId: data.playerId,
+              nonce: `sync_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+            });
           }
           break;
         }
+
         case 'PLAYER_ACTION': {
           if (data.action) {
             const updated = reduceGameAction(roomRef.current, data.action);
@@ -912,6 +936,7 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
               publishToNetwork({
                 type: 'SYNC_ROOM',
                 roomCode: normalizedCode,
+                fromRole: 'host',
                 room: updated,
                 revision: updated.revision,
                 fromHost: true,
@@ -921,8 +946,12 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
           }
           break;
         }
+
         case 'HOST_ACTION': {
-          // Host actions are ALWAYS authoritative and applied immediately with force = true
+          // Requirement 2: If we are the Host, ignore network HOST_ACTION (local host is authority)
+          if (role === 'host') {
+            return;
+          }
           if (data.room) {
             applyRoomState(data.room, true);
           } else if (data.action) {
@@ -931,7 +960,13 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
           }
           break;
         }
+
         case 'SYNC_ROOM': {
+          // Requirement 2: If role === 'host', ignore incoming SYNC_ROOM (especially from TV)
+          // so TV can never overwrite the Host's current phase, question index, or lock state!
+          if (role === 'host') {
+            return;
+          }
           if (data.room) {
             if (data.targetPlayerId && role === 'player' && data.targetPlayerId !== playerId) {
               return;
@@ -940,7 +975,12 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
           }
           break;
         }
+
         case 'HEARTBEAT': {
+          // Requirement 2: If role === 'host', ignore incoming HEARTBEAT from TV
+          if (role === 'host') {
+            return;
+          }
           const localRev = roomRef.current.revision || 1;
           if (
             (data.revision && data.revision > localRev) ||
@@ -962,6 +1002,7 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
           }
           break;
         }
+
         default:
           break;
       }

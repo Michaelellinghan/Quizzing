@@ -935,6 +935,234 @@ Only output valid raw JSON without markdown formatting.`;
   }
 });
 
+// 2c. AI Question Autocomplete / Smart Auto-Fill
+app.post('/api/ai/autocomplete-question', async (req, res) => {
+  try {
+    const { promptText = '', currentCategory = '', currentType = 'MCQ' } = req.body;
+    const cleanPrompt = String(promptText || '').trim();
+
+    if (!cleanPrompt) {
+      return res.status(400).json({ error: 'Question prompt is required' });
+    }
+
+    const aiPrompt = `You are an expert trivia writer. The user has started drafting a quiz question:
+Input: "${cleanPrompt}"
+Category Hint: "${currentCategory || 'General Knowledge'}"
+Desired Format: "${currentType}"
+
+Task: Complete this question into a fun, authentic, family-friendly pub quiz question.
+- Fix any typos or make the phrasing crisp and engaging.
+- Provide the exact correct answer.
+- Provide 4 compelling multiple-choice options (including the correct answer) if format is MCQ.
+- Provide the best category.
+- Provide a concise 1-sentence fun fact or backstory for the host.
+
+Return STRICT JSON ONLY conforming to this schema:
+{
+  "question": "Polished question text",
+  "answer": "Accurate correct answer",
+  "category": "Category name",
+  "type": "${currentType}",
+  "options": ["Option A", "Option B", "Option C", "Option D"],
+  "points": 10,
+  "explanation": "Interesting 1-sentence trivia fact or context"
+}`;
+
+    let result: any = null;
+
+    try {
+      const { text } = await callGeminiSafe(
+        'gemini-3.1-flash-lite',
+        {
+          contents: [{ role: 'user', parts: [{ text: aiPrompt }] }],
+          config: { responseMimeType: 'application/json' }
+        },
+        5000
+      );
+
+      const raw = text || '{}';
+      result = JSON.parse(raw);
+    } catch (e: any) {
+      console.warn('Autocomplete Gemini call fallback:', e?.message || e);
+      // Heuristic fallback
+      result = {
+        question: cleanPrompt.endsWith('?') ? cleanPrompt : `${cleanPrompt}?`,
+        answer: 'Correct Answer',
+        category: currentCategory || 'General Knowledge',
+        type: currentType,
+        options: currentType === 'MCQ' ? ['Option A', 'Option B', 'Option C', 'Option D'] : [],
+        points: 10,
+        explanation: 'Trivia fact.'
+      };
+    }
+
+    res.json({ success: true, data: result });
+  } catch (error: any) {
+    console.error('Autocomplete error:', error);
+    res.status(500).json({ error: error?.message || 'Failed to autocomplete question' });
+  }
+});
+
+// 2d. Magic Raw Text / Paste Parser to Questions
+app.post('/api/ai/magic-parse-paste', async (req, res) => {
+  try {
+    const { rawText = '', defaultCategory = 'General Trivia', defaultType = 'TEXT' } = req.body;
+    const textToParse = String(rawText || '').trim();
+
+    if (!textToParse) {
+      return res.status(400).json({ error: 'Text content is required' });
+    }
+
+    const aiPrompt = `You are a smart trivia quiz parser. The user has pasted raw quiz notes, copy-pasted text, an email, or a list:
+"""
+${textToParse.slice(0, 4000)}
+"""
+
+Task: Extract all trivia questions and answers from this text.
+For each question:
+- Clean up formatting and numbers (e.g. remove "1.", "Q:", "A:").
+- Determine question type: if 4 options are provided or it's multiple choice, set type to "MCQ". If a short answer, set type to "TEXT" or "BUZZER".
+- If options exist, extract them into options array.
+- Extract or assign an appropriate category (use "${defaultCategory}" if unknown).
+- Assign standard 10 points.
+
+Return a STRICT JSON array of questions:
+[
+  {
+    "id": "q_1",
+    "type": "TEXT",
+    "category": "${defaultCategory}",
+    "question": "Question text here",
+    "options": [],
+    "answer": "Correct answer",
+    "points": 10,
+    "explanation": ""
+  }
+]
+Only output valid JSON array without commentary.`;
+
+    let questions: Question[] = [];
+
+    try {
+      const { text } = await callGeminiSafe(
+        'gemini-3.1-flash-lite',
+        {
+          contents: [{ role: 'user', parts: [{ text: aiPrompt }] }],
+          config: { responseMimeType: 'application/json' }
+        },
+        8000
+      );
+
+      const raw = text || '[]';
+      try {
+        questions = JSON.parse(raw);
+      } catch {
+        const match = raw.match(/\[.*\]/s);
+        if (match) questions = JSON.parse(match[0]);
+      }
+    } catch (e: any) {
+      console.warn('AI Magic Parse fallback engaged:', e?.message || e);
+    }
+
+    // If Gemini parsing yielded nothing, use robust rule-based fallback
+    if (!Array.isArray(questions) || questions.length === 0) {
+      const lines = textToParse.split('\n');
+      let curQ = '';
+      let curA = '';
+      const fallbackList: Question[] = [];
+
+      const flush = () => {
+        if (curQ && curA) {
+          fallbackList.push({
+            id: `parse_${Date.now()}_${fallbackList.length}`,
+            type: defaultType as any,
+            category: defaultCategory,
+            question: curQ.trim(),
+            answer: curA.trim(),
+            options: [],
+            points: 10
+          });
+        }
+        curQ = '';
+        curA = '';
+      };
+
+      for (const line of lines) {
+        const trimmed = line.trim();
+        if (!trimmed) continue;
+
+        if (trimmed.includes('|')) {
+          flush();
+          const [q, a] = trimmed.split('|');
+          if (q && a) {
+            fallbackList.push({
+              id: `parse_${Date.now()}_${fallbackList.length}`,
+              type: defaultType as any,
+              category: defaultCategory,
+              question: q.trim(),
+              answer: a.trim(),
+              options: [],
+              points: 10
+            });
+          }
+        } else if (trimmed.includes('\t')) {
+          flush();
+          const [q, a] = trimmed.split('\t');
+          if (q && a) {
+            fallbackList.push({
+              id: `parse_${Date.now()}_${fallbackList.length}`,
+              type: defaultType as any,
+              category: defaultCategory,
+              question: q.trim(),
+              answer: a.trim(),
+              options: [],
+              points: 10
+            });
+          }
+        } else if (/^(?:q|question|\d+[\.\)])\s*[:\.]?\s*(.+)/i.test(trimmed)) {
+          flush();
+          const match = trimmed.match(/^(?:q|question|\d+[\.\)])\s*[:\.]?\s*(.+)/i);
+          curQ = match ? match[1].trim() : trimmed;
+        } else if (/^(?:a|answer)\s*[:\.]?\s*(.+)/i.test(trimmed)) {
+          const match = trimmed.match(/^(?:a|answer)\s*[:\.]?\s*(.+)/i);
+          curA = match ? match[1].trim() : trimmed;
+        } else if (trimmed.includes(' - ') && !curQ) {
+          flush();
+          const parts = trimmed.split(' - ');
+          if (parts.length >= 2) {
+            fallbackList.push({
+              id: `parse_${Date.now()}_${fallbackList.length}`,
+              type: defaultType as any,
+              category: defaultCategory,
+              question: parts[0].trim(),
+              answer: parts.slice(1).join(' - ').trim(),
+              options: [],
+              points: 10
+            });
+          }
+        }
+      }
+      flush();
+      questions = fallbackList;
+    }
+
+    // Normalize IDs and properties
+    questions = (questions || []).map((q, idx) => ({
+      ...q,
+      id: q.id || `q_${Date.now()}_${idx}`,
+      points: Number(q.points) || 10,
+      category: q.category || defaultCategory,
+      type: q.type || defaultType,
+      options: Array.isArray(q.options) ? q.options : []
+    }));
+
+    res.json({ success: true, questions });
+  } catch (error: any) {
+    console.error('Magic parse error:', error);
+    res.status(500).json({ error: error?.message || 'Failed to parse questions' });
+  }
+});
+
 // 3. AI Answer Adjudicator
 app.post('/api/ai/adjudicate-answer', async (req, res) => {
   try {
