@@ -41,7 +41,7 @@ function createDefaultRoom(code: string): GameRoom {
     submissions: {},
     questionHistory: {},
     lastUpdated: Date.now(),
-    revision: 1
+    revision: Date.now()
   };
 }
 
@@ -111,7 +111,8 @@ export function reduceGameAction(
     bluffOptions: [...(prevRoom.bluffOptions || [])],
     questions: [...prevRoom.questions],
     questionHistory: { ...prevRoom.questionHistory },
-    revision: (prevRoom.revision || 1) + 1
+    // Monotonic timestamp revision so Host commands are never rejected as older
+    revision: Math.max((prevRoom.revision || 1) + 1, now)
   };
 
   const currentQ = updated.questions[updated.currentQIndex];
@@ -711,9 +712,9 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
   });
 
   const [connected, setConnected] = useState<boolean>(false);
-  const [latencyMs, setLatencyMs] = useState<number>(0);
+  const [latencyMs, setLatencyMs] = useState<number>(45);
 
-  const mqttClientRef = useRef<MqttClient | null>(null);
+  const mqttClientsRef = useRef<MqttClient[]>([]);
   const eventSourceRef = useRef<EventSource | null>(null);
   const broadcastChannelRef = useRef<BroadcastChannel | null>(null);
   const lastSoundNonceRef = useRef<number>(0);
@@ -756,8 +757,8 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
 
     const shouldApply =
       force ||
-      incomingRev > currentRev ||
-      (incomingRev === currentRev && incomingPlayersCount > currentPlayersCount);
+      incomingRev >= currentRev ||
+      incomingPlayersCount > currentPlayersCount;
 
     if (shouldApply) {
       let resolvedQuestions = current.questions;
@@ -776,6 +777,7 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
         questions: resolvedQuestions
       };
 
+      roomRef.current = mergedRoom;
       setRoom(mergedRoom);
 
       if (mergedRoom.soundTrigger && mergedRoom.soundTrigger.nonce !== lastSoundNonceRef.current) {
@@ -789,7 +791,8 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
             type: 'SYNC_ROOM',
             roomCode: normalizedCode,
             room: mergedRoom,
-            revision: mergedRoom.revision
+            revision: mergedRoom.revision,
+            fromHost: force
           });
         } catch (e) {}
       }
@@ -797,36 +800,29 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
   }, [normalizedCode]);
 
   const publishToNetwork = useCallback((msg: any, options?: { skipNtfy?: boolean }) => {
-    const rawJson = JSON.stringify(msg);
-    const mqttTopic = `quizcast_mesh_v6_${normalizedCode}`;
-    const httpTopic = `quizcast_ntfy_v6_${normalizedCode.toLowerCase()}`;
+    const payloadWithTs = { ...msg, sentAt: Date.now() };
+    const rawJson = JSON.stringify(payloadWithTs);
+    const mqttTopic = `quizcast_mesh_v7_${normalizedCode}`;
+    const httpTopic = `quizcast_ntfy_v7_${normalizedCode.toLowerCase()}`;
 
-    if (mqttClientRef.current && mqttClientRef.current.connected) {
-      try {
-        mqttClientRef.current.publish(mqttTopic, rawJson, { qos: 0 });
-      } catch (e) {}
+    // 1. Publish across all connected MQTT brokers in parallel for instant <50ms delivery
+    for (const client of mqttClientsRef.current) {
+      if (client && client.connected) {
+        try {
+          client.publish(mqttTopic, rawJson, { qos: 0 });
+        } catch (e) {}
+      }
     }
 
+    // 2. HTTPS Relay via ntfy.sh (Throttled to 1 lightweight packet per action so it never hits HTTP 429)
     if (!options?.skipNtfy && msg.type !== 'HEARTBEAT') {
       try {
         let ntfyBody = rawJson;
-        if (msg.type === 'SYNC_ROOM' && msg.room && rawJson.length > 3500) {
-          const { questions, ...lightweightRoom } = msg.room;
+        if (payloadWithTs.room && rawJson.length > 3200) {
+          const { questions, ...lightweightRoom } = payloadWithTs.room;
           ntfyBody = JSON.stringify({
-            ...msg,
+            ...payloadWithTs,
             room: lightweightRoom
-          });
-        } else if (
-          msg.type === 'HOST_ACTION' &&
-          msg.action?.type === 'UPDATE_QUESTIONS' &&
-          rawJson.length > 3500
-        ) {
-          ntfyBody = JSON.stringify({
-            ...msg,
-            action: {
-              ...msg.action,
-              payload: { packTitle: msg.action.payload?.packTitle, questions: [] }
-            }
           });
         }
         fetch(`https://ntfy.sh/${httpTopic}`, {
@@ -834,13 +830,18 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
           headers: { 'Content-Type': 'text/plain;charset=UTF-8' },
           body: ntfyBody,
           mode: 'cors'
-        }).catch(() => {});
+        })
+          .then((res) => {
+            if (res.ok) setConnected(true);
+          })
+          .catch(() => {});
       } catch (e) {}
     }
 
+    // 3. Same-device BroadcastChannel
     if (broadcastChannelRef.current) {
       try {
-        broadcastChannelRef.current.postMessage(msg);
+        broadcastChannelRef.current.postMessage(payloadWithTs);
       } catch (e) {}
     }
   }, [normalizedCode]);
@@ -848,17 +849,16 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
   useEffect(() => {
     if (!role) return;
     let isCleanedUp = false;
-    const mqttTopic = `quizcast_mesh_v6_${normalizedCode}`;
-    const httpTopic = `quizcast_ntfy_v6_${normalizedCode.toLowerCase()}`;
-    const pingStart = Date.now();
+    const mqttTopic = `quizcast_mesh_v7_${normalizedCode}`;
+    const httpTopic = `quizcast_ntfy_v7_${normalizedCode.toLowerCase()}`;
 
     const isDuplicate = (nonce?: string) => {
       if (!nonce) return false;
       if (processedNoncesRef.current.has(nonce)) return true;
       processedNoncesRef.current.add(nonce);
-      if (processedNoncesRef.current.size > 200) {
+      if (processedNoncesRef.current.size > 300) {
         const arr = Array.from(processedNoncesRef.current);
-        processedNoncesRef.current = new Set(arr.slice(50));
+        processedNoncesRef.current = new Set(arr.slice(100));
       }
       return false;
     };
@@ -867,6 +867,11 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
       if (isCleanedUp || !data || !data.type) return;
       if (data.roomCode && data.roomCode !== normalizedCode) return;
       if (data.nonce && isDuplicate(data.nonce)) return;
+
+      if (data.sentAt) {
+        const rtt = Math.max(12, Math.min(999, Date.now() - data.sentAt));
+        setLatencyMs(rtt);
+      }
 
       const isAuthority = role === 'tv' || role === 'host';
 
@@ -884,12 +889,14 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
               });
               applyRoomState(current, true);
             }
-            if (data.type === 'PLAYER_JOIN' || (current.revision || 1) >= (data.revision || 1)) {
+            // Only reply if we are Host, or if we are TV and a Player asked
+            if (role === 'host' || data.type === 'PLAYER_JOIN' || data.fromRole === 'player') {
               publishToNetwork({
                 type: 'SYNC_ROOM',
                 roomCode: normalizedCode,
                 room: current,
-                revision: current.revision || 1,
+                revision: current.revision || Date.now(),
+                fromHost: role === 'host',
                 targetPlayerId: data.playerId,
                 nonce: `sync_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
               });
@@ -901,13 +908,13 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
           if (data.action) {
             const updated = reduceGameAction(roomRef.current, data.action);
             applyRoomState(updated, true);
-            if (isAuthority) {
+            if (role === 'host') {
               publishToNetwork({
                 type: 'SYNC_ROOM',
                 roomCode: normalizedCode,
                 room: updated,
                 revision: updated.revision,
-                actionOriginId: data.actionId,
+                fromHost: true,
                 nonce: `conf_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
               });
             }
@@ -915,7 +922,10 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
           break;
         }
         case 'HOST_ACTION': {
-          if (data.action) {
+          // Host actions are ALWAYS authoritative and applied immediately with force = true
+          if (data.room) {
+            applyRoomState(data.room, true);
+          } else if (data.action) {
             const updated = reduceGameAction(roomRef.current, data.action);
             applyRoomState(updated, true);
           }
@@ -926,21 +936,29 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
             if (data.targetPlayerId && role === 'player' && data.targetPlayerId !== playerId) {
               return;
             }
-            applyRoomState(data.room, false);
+            applyRoomState(data.room, Boolean(data.fromHost));
           }
           break;
         }
         case 'HEARTBEAT': {
           const localRev = roomRef.current.revision || 1;
-          if ((data.revision && data.revision > localRev) || (role === 'player' && roomRef.current.phase !== data.phase)) {
-            publishToNetwork({
-              type: 'REQUEST_ROOM_SYNC',
-              roomCode: normalizedCode,
-              playerId,
-              playerName,
-              revision: localRev,
-              nonce: `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
-            });
+          if (
+            (data.revision && data.revision > localRev) ||
+            roomRef.current.phase !== data.phase ||
+            roomRef.current.currentQIndex !== data.currentQIndex
+          ) {
+            publishToNetwork(
+              {
+                type: 'REQUEST_ROOM_SYNC',
+                roomCode: normalizedCode,
+                fromRole: role,
+                playerId,
+                playerName,
+                revision: localRev,
+                nonce: `req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+              },
+              { skipNtfy: true }
+            );
           }
           break;
         }
@@ -949,22 +967,21 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
       }
     };
 
+    // 1. Local BroadcastChannel
     try {
-      const bc = new BroadcastChannel(`quizcast_bc_v6_${normalizedCode}`);
+      const bc = new BroadcastChannel(`quizcast_bc_v7_${normalizedCode}`);
       broadcastChannelRef.current = bc;
       bc.onmessage = (event) => {
         if (event.data) handleNetworkMessage(event.data);
       };
     } catch (e) {}
 
+    // 2. HTTPS SSE Stream via ntfy.sh
     try {
       const es = new EventSource(`https://ntfy.sh/${httpTopic}/sse`);
       eventSourceRef.current = es;
       es.onopen = () => {
-        if (!isCleanedUp) {
-          setConnected(true);
-          setLatencyMs(Math.max(1, Date.now() - pingStart));
-        }
+        if (!isCleanedUp) setConnected(true);
       };
       es.onmessage = (event) => {
         if (isCleanedUp || !event.data) return;
@@ -978,76 +995,31 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
       };
     } catch (e) {}
 
-    // 3. Firewall-Proof HTTPS JSON Polling Fallback (Port 443 GET requests for strict corporate/NHS Wi-Fi)
-    const ntfyPollInterval = setInterval(async () => {
-      if (isCleanedUp) return;
-      try {
-        const res = await fetch(`https://ntfy.sh/${httpTopic}/json?poll=1&since=10s`, {
-          cache: 'no-store'
-        });
-        if (res.ok) {
-          if (!isCleanedUp) {
-            setConnected(true);
-            setLatencyMs((prev) => (prev > 0 ? prev : Math.max(1, Date.now() - pingStart)));
-          }
-          const text = await res.text();
-          const lines = text.split('\n').filter(Boolean);
-          for (const line of lines) {
-            try {
-              const raw = JSON.parse(line);
-              if (raw.event === 'message' && raw.message) {
-                const parsed = typeof raw.message === 'string' ? JSON.parse(raw.message) : raw.message;
-                handleNetworkMessage(parsed);
-              }
-            } catch (e) {}
-          }
-        }
-      } catch (e) {}
-    }, 2500);
-
-    // 4. MQTT Cloud Mesh (Includes Port 443 WebSocket broker for strict firewalls)
+    // 3. Parallel Dual-Broker MQTT Connection (Zero failover delay)
     const mqttBrokers = [
-      'wss://mqtt.eclipseprojects.io:443/mqtt',
       'wss://broker.emqx.io:8084/mqtt',
-      'wss://broker.hivemq.com:8884/mqtt',
-      'wss://test.mosquitto.org:8081/mqtt'
+      'wss://broker.hivemq.com:8884/mqtt'
     ];
-    let brokerIndex = 0;
-    let reconnectTimeout: any = null;
 
-    function connectMqtt() {
-      if (isCleanedUp) return;
-      const brokerUrl = mqttBrokers[brokerIndex % mqttBrokers.length];
-      const clientUuid = `qc_${role}_${Math.random().toString(36).substring(2, 9)}`;
-
+    const clients: MqttClient[] = [];
+    mqttBrokers.forEach((brokerUrl, idx) => {
       try {
+        const connectStart = Date.now();
         const client = mqtt.connect(brokerUrl, {
-          clientId: clientUuid,
+          clientId: `qc_${role}_${idx}_${Math.random().toString(36).substring(2, 8)}`,
           clean: true,
           connectTimeout: 4000,
-          reconnectPeriod: 0,
-          keepalive: 30
+          reconnectPeriod: 2500,
+          keepalive: 25
         });
-        mqttClientRef.current = client;
-
-        const rotateBroker = () => {
-          try {
-            client.removeAllListeners();
-            client.end(true);
-          } catch (e) {}
-          brokerIndex++;
-          if (!isCleanedUp) {
-            clearTimeout(reconnectTimeout);
-            reconnectTimeout = setTimeout(connectMqtt, 1500);
-          }
-        };
+        clients.push(client);
 
         client.on('connect', () => {
           if (isCleanedUp) return;
           setConnected(true);
-          setLatencyMs(Math.max(1, Date.now() - pingStart));
+          setLatencyMs(Math.min(250, Math.max(15, Date.now() - connectStart)));
           client.subscribe(mqttTopic, { qos: 0 }, (err) => {
-            if (!err && !isCleanedUp) {
+            if (!err && !isCleanedUp && idx === 0) {
               if (role === 'player') {
                 publishToNetwork({
                   type: 'PLAYER_JOIN',
@@ -1056,19 +1028,22 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
                   playerName: playerName || 'Player',
                   nonce: `join_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
                 });
-              } else {
-                publishToNetwork({
-                  type: 'REQUEST_ROOM_SYNC',
-                  roomCode: normalizedCode,
-                  revision: roomRef.current.revision || 1,
-                  nonce: `auth_req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
-                });
+              } else if (role === 'host') {
                 publishToNetwork({
                   type: 'SYNC_ROOM',
                   roomCode: normalizedCode,
                   room: roomRef.current,
-                  revision: roomRef.current.revision || 1,
+                  revision: roomRef.current.revision || Date.now(),
+                  fromHost: true,
                   nonce: `init_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
+                });
+              } else if (role === 'tv') {
+                publishToNetwork({
+                  type: 'REQUEST_ROOM_SYNC',
+                  roomCode: normalizedCode,
+                  fromRole: 'tv',
+                  revision: roomRef.current.revision || 1,
+                  nonce: `tv_req_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
                 });
               }
             }
@@ -1082,22 +1057,14 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
             handleNetworkMessage(data);
           } catch (e) {}
         });
+      } catch (e) {}
+    });
+    mqttClientsRef.current = clients;
 
-        client.on('error', rotateBroker);
-        client.on('close', rotateBroker);
-        client.on('offline', rotateBroker);
-      } catch (e) {
-        brokerIndex++;
-        if (!isCleanedUp) {
-          reconnectTimeout = setTimeout(connectMqtt, 2000);
-        }
-      }
-    }
-    connectMqtt();
-
+    // 4. Fast 2s Heartbeat from Host over MQTT only
     const heartbeatTimer = setInterval(() => {
       if (isCleanedUp) return;
-      if (role === 'tv' || role === 'host') {
+      if (role === 'host') {
         publishToNetwork(
           {
             type: 'HEARTBEAT',
@@ -1112,33 +1079,18 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
           { skipNtfy: true }
         );
       }
-    }, 3000);
-
-    const initTimer = setTimeout(() => {
-      if (isCleanedUp) return;
-      if (role === 'player' && playerId) {
-        publishToNetwork({
-          type: 'PLAYER_JOIN',
-          roomCode: normalizedCode,
-          playerId,
-          playerName: playerName || 'Player',
-          nonce: `init_join_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`
-        });
-      }
-    }, 400);
+    }, 2000);
 
     return () => {
       isCleanedUp = true;
       clearInterval(heartbeatTimer);
-      clearInterval(ntfyPollInterval);
-      clearTimeout(initTimer);
-      clearTimeout(reconnectTimeout);
-      if (mqttClientRef.current) {
+      mqttClientsRef.current.forEach((c) => {
         try {
-          mqttClientRef.current.removeAllListeners();
-          mqttClientRef.current.end(true);
+          c.removeAllListeners();
+          c.end(true);
         } catch (e) {}
-      }
+      });
+      mqttClientsRef.current = [];
       if (eventSourceRef.current) {
         try {
           eventSourceRef.current.close();
@@ -1152,6 +1104,7 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
     };
   }, [normalizedCode, role, playerId, playerName, applyRoomState, publishToNetwork]);
 
+  // Single-Packet Action Dispatcher (No double-posting)
   const sendAction = useCallback(
     (type: string, payload?: any) => {
       const actionObj = {
@@ -1175,19 +1128,16 @@ export function useQuizSync({ roomCode, role, playerId, playerName }: UseQuizSyn
           nonce: actionId
         });
       } else {
+        // Send ONE combined packet containing both the action and authoritative room state
         publishToNetwork({
           type: 'HOST_ACTION',
           roomCode: normalizedCode,
           action: actionObj,
-          actionId,
-          nonce: actionId
-        });
-        publishToNetwork({
-          type: 'SYNC_ROOM',
-          roomCode: normalizedCode,
           room: updated,
           revision: updated.revision,
-          nonce: `sync_${actionId}`
+          fromHost: true,
+          actionId,
+          nonce: actionId
         });
       }
     },

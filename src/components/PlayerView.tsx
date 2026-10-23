@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { GameRoom, Player, ConfidenceLevel, SabotageType } from '../types/quiz';
+import { useHaptics } from '../utils/haptics';
 import {
   Pencil,
   Check,
@@ -78,6 +79,8 @@ export function PlayerView({
   const [iceTapsLeft, setIceTapsLeft] = useState<number>(0);
   const [showSabotageMenu, setShowSabotageMenu] = useState<boolean>(false);
 
+  const haptics = useHaptics();
+
   const currentQ = room.questions[room.currentQIndex];
   const mySubmission = room.submissions[playerId];
   const myLie = room.bluffLies?.[playerId];
@@ -87,6 +90,35 @@ export function PlayerView({
   const otherPlayers = playersList.filter((p) => p.id !== playerId);
   const myPlayer = room.players[playerId];
   const activeSabotage = myPlayer?.sabotageEffect;
+
+  // Haptic feedback for wrong or correct answer evaluation
+  const prevStatusRef = useRef<string | undefined>(mySubmission?.status);
+  const prevPhaseRef = useRef<string>(room.phase);
+
+  useEffect(() => {
+    const currentStatus = mySubmission?.status;
+    const prevStatus = prevStatusRef.current;
+
+    if (currentStatus && currentStatus !== prevStatus) {
+      if (currentStatus === 'wrong') {
+        haptics.wrong();
+      } else if (currentStatus === 'correct') {
+        haptics.correct();
+      }
+    }
+    prevStatusRef.current = currentStatus;
+  }, [mySubmission?.status, haptics]);
+
+  useEffect(() => {
+    if (room.phase === 'REVEAL' && prevPhaseRef.current !== 'REVEAL') {
+      if (mySubmission?.status === 'wrong') {
+        haptics.wrong();
+      } else if (mySubmission?.status === 'correct') {
+        haptics.correct();
+      }
+    }
+    prevPhaseRef.current = room.phase;
+  }, [room.phase, mySubmission?.status, haptics]);
 
   useEffect(() => {
     setTextAnswer('');
@@ -109,18 +141,27 @@ export function PlayerView({
     e.preventDefault();
     const cleaned = nameInput.trim();
     if (!cleaned) return;
+    haptics.tap();
     onUpdatePlayerName(cleaned);
     setIsEditingName(false);
   };
 
   const handleRandomName = () => {
+    haptics.tap();
     const pick = FUN_PUB_NAMES[Math.floor(Math.random() * FUN_PUB_NAMES.length)];
     setNameInput(pick);
+  };
+
+  const handleBuzzIn = () => {
+    if (!room.inputOpen || hasBuzzed) return;
+    haptics.buzz();
+    onBuzzIn();
   };
 
   const handleSendText = (e: React.FormEvent) => {
     e.preventDefault();
     if (!textAnswer.trim() || !room.inputOpen) return;
+    haptics.submit();
     if (currentQ?.type === 'BLUFF' && room.bluffStage === 'ENTER_LIES') {
       onSubmitLie?.(textAnswer.trim());
     } else {
@@ -128,13 +169,24 @@ export function PlayerView({
     }
   };
 
+  const handleSelectOption = (opt: string) => {
+    if (!room.inputOpen) return;
+    haptics.submit();
+    onSubmitAnswer(opt);
+  };
+
   const handleNumPad = (key: string) => {
     if (!room.inputOpen) return;
     if (key === 'C') {
+      haptics.tap();
       setNumAnswer('');
     } else if (key === 'enter') {
-      if (numAnswer.trim()) onSubmitAnswer(numAnswer.trim());
+      if (numAnswer.trim()) {
+        haptics.submit();
+        onSubmitAnswer(numAnswer.trim());
+      }
     } else if (numAnswer.length < 9) {
+      haptics.tap();
       setNumAnswer((prev) => prev + key);
     }
   };
@@ -212,6 +264,7 @@ export function PlayerView({
       {activeSabotage?.type === 'ICE' && iceTapsLeft > 0 && (
         <div
           onClick={() => {
+            haptics.shatter();
             if (iceTapsLeft <= 1) {
               setIceTapsLeft(0);
               onClearSabotage?.();
@@ -376,7 +429,10 @@ export function PlayerView({
                   <button
                     type="button"
                     disabled={!room.inputOpen}
-                    onClick={onToggleDoubleDown}
+                    onClick={() => {
+                      haptics.tap();
+                      onToggleDoubleDown();
+                    }}
                     className={`flex items-center gap-1 text-[10px] font-black uppercase tracking-wider px-2.5 py-0.5 rounded-full border transition ${
                       myPlayer?.doubleDownActive
                         ? 'bg-yellow-400 text-slate-950 border-yellow-300'
@@ -403,7 +459,10 @@ export function PlayerView({
                       <button
                         key={c.id}
                         type="button"
-                        onClick={() => onSetConfidence?.(c.id)}
+                        onClick={() => {
+                          haptics.tap();
+                          onSetConfidence?.(c.id);
+                        }}
                         className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold border transition ${
                           active
                             ? 'bg-pink-500 text-white border-pink-400'
@@ -425,7 +484,10 @@ export function PlayerView({
                     <button
                       key={p.id}
                       type="button"
-                      onClick={() => onSetHeistTarget?.(p.id)}
+                      onClick={() => {
+                        haptics.tap();
+                        onSetHeistTarget?.(p.id);
+                      }}
                       className={`px-2 py-0.5 rounded-full text-[10px] font-extrabold shrink-0 ${
                         myPlayer?.heistTargetId === p.id
                           ? 'bg-rose-500 text-white'
@@ -455,7 +517,7 @@ export function PlayerView({
                       key={opt}
                       type="button"
                       disabled={!room.inputOpen}
-                      onClick={() => onSubmitAnswer(opt)}
+                      onClick={() => handleSelectOption(opt)}
                       className={`w-full py-2.5 px-5 rounded-full font-extrabold text-sm transition-all flex items-center justify-center gap-2 shadow-lg ${
                         isSelected
                           ? 'bg-yellow-400 text-slate-950 scale-[1.02]'
@@ -495,7 +557,7 @@ export function PlayerView({
                   <button
                     type="button"
                     disabled={!room.inputOpen || hasBuzzed}
-                    onClick={onBuzzIn}
+                    onClick={handleBuzzIn}
                     className={`w-40 h-40 rounded-full font-black text-2xl uppercase tracking-wider shadow-2xl transition-all flex flex-col items-center justify-center gap-1.5 ${
                       hasBuzzed
                         ? 'bg-emerald-500 text-white scale-95'
